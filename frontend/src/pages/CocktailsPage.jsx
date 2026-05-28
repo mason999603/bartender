@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import PageHeader from "@/components/PageHeader";
-import { MagnifyingGlass, X, Plus, Flask, ArrowsLeftRight } from "@phosphor-icons/react";
+import { MagnifyingGlass, X, Plus, Flask, ArrowsLeftRight, Trash } from "@phosphor-icons/react";
 import { Toaster, toast } from "sonner";
 
 const FLAVOUR_CHIPS = [
@@ -10,8 +10,9 @@ const FLAVOUR_CHIPS = [
     "nutty", "fizzy", "dry", "refreshing", "rich", "complex",
 ];
 
-function CocktailModal({ cocktail, onClose, outOfStock = [] }) {
+function CocktailModal({ cocktail, onClose, outOfStock = [], onDelete }) {
     const [subHints, setSubHints] = useState({}); // { ingredientName: [subs] }
+    const [deleting, setDeleting] = useState(false);
 
     useEffect(() => {
         if (!cocktail) return;
@@ -46,6 +47,21 @@ function CocktailModal({ cocktail, onClose, outOfStock = [] }) {
     const isOut = (name) =>
         outOfStock.some((o) => o.toLowerCase().includes(name.toLowerCase()) || name.toLowerCase().includes(o.toLowerCase()));
 
+    const handleDelete = async () => {
+        if (!cocktail.is_custom) return;
+        if (!window.confirm(`Remove '${cocktail.name}' from your library? This can't be undone.`)) return;
+        setDeleting(true);
+        try {
+            await api.delete(`/cocktails/${cocktail.id}`);
+            toast.success(`'${cocktail.name}' removed from your library`);
+            onDelete?.(cocktail.id);
+        } catch (e) {
+            toast.error(e?.response?.data?.detail || "Couldn't delete that one");
+        } finally {
+            setDeleting(false);
+        }
+    };
+
     return (
         <div
             className="fixed inset-0 z-50 flex items-center justify-center p-4 fade-in"
@@ -64,6 +80,19 @@ function CocktailModal({ cocktail, onClose, outOfStock = [] }) {
                 >
                     <X size={20} />
                 </button>
+                {cocktail.is_custom && (
+                    <button
+                        onClick={handleDelete}
+                        disabled={deleting}
+                        className="absolute top-4 right-14 p-2 rounded-lg hover:bg-red-500/10 flex items-center gap-1.5 text-xs"
+                        style={{ color: "#FCA5A5" }}
+                        data-testid="modal-delete-cocktail"
+                        title="Delete this custom spec"
+                    >
+                        <Trash size={16} />
+                        {deleting ? "Removing…" : "Delete"}
+                    </button>
+                )}
                 <div className="label-tiny mb-2">{cocktail.category}</div>
                 <h2 className="font-serif text-4xl mb-4" style={{ color: "var(--accent)" }}>
                     {cocktail.name}
@@ -328,7 +357,15 @@ export default function CocktailsPage() {
                 </div>
             )}
 
-            <CocktailModal cocktail={selected} onClose={() => setSelected(null)} outOfStock={outOfStock} />
+            <CocktailModal
+                cocktail={selected}
+                onClose={() => setSelected(null)}
+                outOfStock={outOfStock}
+                onDelete={(id) => {
+                    setCocktails((prev) => prev.filter((c) => c.id !== id));
+                    setSelected(null);
+                }}
+            />
             {showCreate && (
                 <CreateCocktailModal
                     onClose={() => setShowCreate(false)}
