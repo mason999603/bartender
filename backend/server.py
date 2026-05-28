@@ -465,9 +465,15 @@ async def companion_weather(location: Optional[str] = None):
 
 @api_router.get("/companion/context")
 async def companion_context():
-    """Preview the real-time grounding block Russell receives. For debugging / UI 'today' card."""
+    """Preview the real-time grounding block Russell receives.
+
+    For debugging / a 'today' card on the UI. Note: this endpoint forces
+    weather inclusion by passing "good morning" as the trigger phrase —
+    real chat traffic only fetches weather when the user's message contains
+    a relevant trigger (see WEATHER_TRIGGERS in companion.py).
+    """
     location, tz_name = await get_user_location_and_tz(db)
-    block = await build_companion_context(db, "good morning")  # trigger weather too
+    block = await build_companion_context(db, "good morning")  # forced weather for preview
     return {"location": location, "timezone": tz_name, "context_block": block}
 
 

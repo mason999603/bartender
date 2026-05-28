@@ -24,7 +24,17 @@ DEFAULT_LOCATION = "Sydney, Australia"
 DEFAULT_TZ = "Australia/Sydney"
 
 # Simple in-memory weather cache: {location_lower: (timestamp, payload)}
+# Note: process-local — fine for single-worker. If we go multi-worker, move to Redis or Mongo.
 _weather_cache: dict = {}
+
+
+def _to_float(v):
+    """Coerce a value to float, returning None on failure or if v is None."""
+    try:
+        return float(v) if v is not None else None
+    except (ValueError, TypeError):
+        return None
+
 
 # WMO weather codes → human description
 # (Open-Meteo uses WMO codes; this is the canonical mapping.)
@@ -102,6 +112,8 @@ async def fetch_weather(location: str) -> Optional[dict]:
                 "https://geocoding-api.open-meteo.com/v1/search",
                 params={"name": query, "count": 1, "format": "json"},
             )
+            if geo.status_code != 200:
+                logger.warning(f"Open-Meteo geocode HTTP {geo.status_code} for {query!r}: {geo.text[:200]}")
             results = (geo.json() or {}).get("results") or []
             if results:
                 r = results[0]
@@ -127,6 +139,8 @@ async def fetch_weather(location: str) -> Optional[dict]:
                         "forecast_days": 1,
                     },
                 )
+                if fc.status_code != 200:
+                    logger.warning(f"Open-Meteo forecast HTTP {fc.status_code} for {place}: {fc.text[:200]}")
                 data = fc.json() if fc.status_code == 200 else {}
                 if not data.get("error") and data.get("current", {}).get("temperature_2m") is not None:
                     cur = data["current"]
@@ -161,47 +175,42 @@ async def fetch_weather(location: str) -> Optional[dict]:
                 params={"format": "j1"},
                 headers={"User-Agent": "Russell-Bartender/1.0"},
             )
-            if r.status_code == 200:
-                j = r.json()
-                cur = (j.get("current_condition") or [{}])[0]
-                today = (j.get("weather") or [{}])[0]
-                area = ((j.get("nearest_area") or [{}])[0]) or {}
-                place = ", ".join(filter(None, [
-                    (area.get("areaName") or [{}])[0].get("value"),
-                    (area.get("region") or [{}])[0].get("value"),
-                    (area.get("country") or [{}])[0].get("value"),
-                ]))
-                desc = (cur.get("weatherDesc") or [{}])[0].get("value", "—").lower()
-                result = {
-                    "place": place or query.title(),
-                    "source": "wttr.in",
-                    "timezone": None,
-                    "temp_c": _to_float(cur.get("temp_C")),
-                    "feels_c": _to_float(cur.get("FeelsLikeC")),
-                    "humidity": _to_float(cur.get("humidity")),
-                    "wind_kmh": _to_float(cur.get("windspeedKmph")),
-                    "is_day": None,
-                    "code": None,
-                    "condition": desc,
-                    "high_c": _to_float(today.get("maxtempC")),
-                    "low_c": _to_float(today.get("mintempC")),
-                    "rain_chance": None,
-                    "sunrise": (today.get("astronomy") or [{}])[0].get("sunrise"),
-                    "sunset": (today.get("astronomy") or [{}])[0].get("sunset"),
-                }
-                _weather_cache[cache_key] = (datetime.utcnow().timestamp(), result)
-                return result
+            if r.status_code != 200:
+                logger.warning(f"wttr.in HTTP {r.status_code} for {query!r}: {r.text[:200]}")
+                return None
+            j = r.json()
+            cur = (j.get("current_condition") or [{}])[0]
+            today = (j.get("weather") or [{}])[0]
+            area = ((j.get("nearest_area") or [{}])[0]) or {}
+            place = ", ".join(filter(None, [
+                (area.get("areaName") or [{}])[0].get("value"),
+                (area.get("region") or [{}])[0].get("value"),
+                (area.get("country") or [{}])[0].get("value"),
+            ]))
+            desc = (cur.get("weatherDesc") or [{}])[0].get("value", "—").lower()
+            result = {
+                "place": place or query.title(),
+                "source": "wttr.in",
+                "timezone": None,
+                "temp_c": _to_float(cur.get("temp_C")),
+                "feels_c": _to_float(cur.get("FeelsLikeC")),
+                "humidity": _to_float(cur.get("humidity")),
+                "wind_kmh": _to_float(cur.get("windspeedKmph")),
+                "is_day": None,
+                "code": None,
+                "condition": desc,
+                "high_c": _to_float(today.get("maxtempC")),
+                "low_c": _to_float(today.get("mintempC")),
+                "rain_chance": None,
+                "sunrise": (today.get("astronomy") or [{}])[0].get("sunrise"),
+                "sunset": (today.get("astronomy") or [{}])[0].get("sunset"),
+            }
+            _weather_cache[cache_key] = (datetime.utcnow().timestamp(), result)
+            return result
         except Exception as e:
             logger.warning(f"wttr.in failed for {query!r}: {e}")
 
     return None
-
-
-def _to_float(v):
-    try:
-        return float(v) if v is not None else None
-    except (ValueError, TypeError):
-        return None
 
 
 def _now_in_tz(tz_name: str) -> datetime:
