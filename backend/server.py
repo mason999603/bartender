@@ -327,7 +327,13 @@ async def chat(req: ChatRequest):
     try:
         reply_text = await chat_client.send_message(UserMessage(text=framed))
     except Exception as e:
+        msg = str(e).lower()
         logger.exception("LLM error")
+        if "budget" in msg and "exceeded" in msg:
+            raise HTTPException(
+                429,
+                "Sheldon's tab is closed for the day, mate — Emergent LLM key budget exceeded. Top it up at Profile → Universal Key → Add Balance.",
+            )
         raise HTTPException(500, f"LLM error: {e}")
 
     reply_str = str(reply_text).strip()
