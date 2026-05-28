@@ -51,9 +51,10 @@ async def seed_db():
         await db.ingredients.insert_many([{**i, "id": str(uuid.uuid4())} for i in new_ing])
         logger.info(f"Seeded {len(new_ing)} new ingredients")
 
-    # Cocktails — upsert by name (non-custom only)
+    # Cocktails — upsert by name (non-custom only), skipping any user-deleted seeds.
     existing_ck = {c["name"] for c in await db.cocktails.find({"is_custom": False}, {"name": 1, "_id": 0}).to_list(2000)}
-    new_ck = [c for c in COCKTAILS if c["name"] not in existing_ck]
+    tombstoned = {t["name"] for t in await db.deleted_seeds.find({}, {"name": 1, "_id": 0}).to_list(2000)}
+    new_ck = [c for c in COCKTAILS if c["name"] not in existing_ck and c["name"] not in tombstoned]
     if new_ck:
         docs = []
         for c in new_ck:

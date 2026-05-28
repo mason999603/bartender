@@ -48,8 +48,12 @@ function CocktailModal({ cocktail, onClose, outOfStock = [], onDelete }) {
         outOfStock.some((o) => o.toLowerCase().includes(name.toLowerCase()) || name.toLowerCase().includes(o.toLowerCase()));
 
     const handleDelete = async () => {
-        if (!cocktail.is_custom) return;
-        if (!window.confirm(`Remove '${cocktail.name}' from your library? This can't be undone.`)) return;
+        if (!cocktail) return;
+        const isSeeded = !cocktail.is_custom;
+        const msg = isSeeded
+            ? `Remove '${cocktail.name}' from your library? It won't come back on its own — you can re-seed manually if you change your mind.`
+            : `Remove '${cocktail.name}' from your library? This can't be undone.`;
+        if (!window.confirm(msg)) return;
         setDeleting(true);
         try {
             await api.delete(`/cocktails/${cocktail.id}`);
@@ -80,14 +84,14 @@ function CocktailModal({ cocktail, onClose, outOfStock = [], onDelete }) {
                 >
                     <X size={20} />
                 </button>
-                {cocktail.is_custom && (
+                {cocktail && (
                     <button
                         onClick={handleDelete}
                         disabled={deleting}
                         className="absolute top-4 right-14 p-2 rounded-lg hover:bg-red-500/10 flex items-center gap-1.5 text-xs"
                         style={{ color: "#FCA5A5" }}
                         data-testid="modal-delete-cocktail"
-                        title="Delete this custom spec"
+                        title="Remove this recipe from your library"
                     >
                         <Trash size={16} />
                         {deleting ? "Removing…" : "Delete"}
@@ -278,6 +282,7 @@ export default function CocktailsPage() {
                 />
                 <input
                     className="input-dark pl-12"
+                    style={{ paddingLeft: 44 }}
                     placeholder={flavourActive ? "Search disabled while flavour filter active" : "Search by name…"}
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}

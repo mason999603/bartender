@@ -44,9 +44,21 @@ async def create_cocktail(c: CocktailCreate):
 
 @router.delete("/{cocktail_id}")
 async def delete_cocktail(cocktail_id: str):
-    result = await db.cocktails.delete_one({"id": cocktail_id, "is_custom": True})
-    if result.deleted_count == 0:
-        raise HTTPException(404, "Cocktail not found or not deletable")
+    # Look up first so we can tombstone seeded recipes (otherwise they'd come back
+    # on the next backend restart when seed_db re-fills missing names).
+    doc = await db.cocktails.find_one({"id": cocktail_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Cocktail not found")
+
+    await db.cocktails.delete_one({"id": cocktail_id})
+
+    if not doc.get("is_custom"):
+        # Track this seeded recipe as deliberately removed — seed_db will skip it forever.
+        await db.deleted_seeds.update_one(
+            {"name": doc["name"]},
+            {"$set": {"name": doc["name"], "deleted_at": doc.get("created_at", "")}},
+            upsert=True,
+        )
     return {"deleted": True}
 
 
