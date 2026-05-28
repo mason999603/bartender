@@ -1,0 +1,18 @@
+# Russell Pi Client — runtime deps.
+# Install on the Pi with: pip install -r requirements_pi.txt
+
+# Cloud comms
+requests>=2.31.0
+python-dotenv>=1.0.0
+
+# Audio I/O (PortAudio binding — easier to install on Pi than pyaudio)
+# On Raspberry Pi OS: sudo apt install -y libportaudio2 portaudio19-dev
+sounddevice>=0.4.6
+numpy>=1.24.0
+soundfile>=0.12.1
+
+# Wake word engine
+pvporcupine>=3.0.0
+
+# TTS — local, offline, Aussie voice
+piper-tts>=1.2.0

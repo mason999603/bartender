@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { api, API } from "@/lib/api";
 import PageHeader from "@/components/PageHeader";
 import { Toaster, toast } from "sonner";
-import { Copy, Phone, ChatText, CheckCircle, Warning, TelegramLogo, ArrowSquareOut } from "@phosphor-icons/react";
+import { Copy, Phone, ChatText, CheckCircle, Warning, TelegramLogo, ArrowSquareOut, Cpu } from "@phosphor-icons/react";
 
 export default function PhonePage() {
     const [status, setStatus] = useState(null);
@@ -284,6 +284,62 @@ TWILIO_PHONE_NUMBER=+61400123456`}
                 <div className="label-tiny mb-2">Costs</div>
                 <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
                     Free. No card. No phone number. Telegram doesn't charge for bot messages — your only cost is the LLM tokens (same as web chat).
+                </p>
+            </div>
+
+            {/* ============================================================ */}
+            {/* RASPBERRY PI                                                 */}
+            {/* ============================================================ */}
+            <div className="mt-16 mb-8 flex items-center gap-3">
+                <Cpu size={28} weight="fill" style={{ color: "var(--accent)" }} />
+                <h2 className="font-serif text-3xl" style={{ color: "var(--text-primary)" }}>
+                    Raspberry Pi — voice in the room
+                </h2>
+            </div>
+            <p className="text-sm mb-6" style={{ color: "var(--text-secondary)" }}>
+                Always-on voice client for your Pi 4. Say <strong style={{ color: "var(--accent)" }}>"Hey Russell"</strong>, ask anything, hear Russell back in his own voice. Wake-word detection runs locally; STT and the brain stay in the cloud; TTS is local Piper (Aussie male, offline).
+            </p>
+
+            <div className="tool-card mb-4">
+                <div className="label-tiny mb-2">Code lives at</div>
+                <div className="text-sm font-mono" style={{ color: "var(--text-primary)" }}>
+                    /app/pi_client/
+                </div>
+                <p className="text-xs mt-2" style={{ color: "var(--text-muted)" }}>
+                    Full setup guide in <code>/app/pi_client/README.md</code>. Save the project to GitHub from the chat box to pull it onto your Pi.
+                </p>
+            </div>
+
+            <Step n="1" title="Get the dependencies">
+                <strong style={{ color: "var(--text-primary)" }}>Picovoice access key</strong> (free) — sign up at <a href="https://console.picovoice.ai/" target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>console.picovoice.ai</a>. Then train a custom "Hey Russell" wake-word in their console (~30 seconds, free) and download the <code>.ppn</code> file for <em>Raspberry Pi (arm64)</em>.
+            </Step>
+
+            <Step n="2" title="Grab a voice">
+                Russell sounds like an Aussie bloke because of the <strong style={{ color: "var(--text-primary)" }}>en_AU-southern_english_male-medium</strong> Piper voice. Download from <a href="https://huggingface.co/rhasspy/piper-voices/tree/main/en/en_AU/southern_english_male/medium" target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>HuggingFace</a> (~60MB, both .onnx and .onnx.json).
+            </Step>
+
+            <Step n="3" title="On the Pi">
+                <pre className="mt-1 p-3 rounded-lg text-xs overflow-x-auto" style={{ background: "rgba(0,0,0,0.4)", border: "1px solid var(--border-subtle)", color: "var(--text-primary)" }}>
+{`sudo apt install -y python3-venv libportaudio2 portaudio19-dev libsndfile1
+cd /opt/russell && python3 -m venv venv && source venv/bin/activate
+pip install -r requirements_pi.txt
+cp .env.example .env  &&  nano .env   # paste keys + paths
+./run.sh`}
+                </pre>
+            </Step>
+
+            <Step n="4" title="Autostart on boot">
+                <pre className="p-3 rounded-lg text-xs overflow-x-auto" style={{ background: "rgba(0,0,0,0.4)", border: "1px solid var(--border-subtle)", color: "var(--text-primary)" }}>
+{`sudo cp systemd/russell.service /etc/systemd/system/
+sudo systemctl enable --now russell.service
+sudo journalctl -u russell -f   # follow logs`}
+                </pre>
+            </Step>
+
+            <div className="tool-card mt-4">
+                <div className="label-tiny mb-2">Architecture</div>
+                <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
+                    Wake word + recording + TTS all run on the Pi. Whisper STT + Claude brain stay in the cloud. <strong style={{ color: "var(--text-primary)" }}>session_id="main"</strong> across all four channels — Russell remembers what you told him on Telegram while you're standing in the kitchen.
                 </p>
             </div>
         </div>

@@ -98,6 +98,21 @@ User started asking "can you give me your source code so I can build an offline 
 - **Frontend**: Phone page renamed to "Channels", new Telegram card + 3-step setup wizard (Create with BotFather → Drop token in .env → Register webhook button). One-click register copies the auto-generated webhook secret to clipboard.
 - Verified end-to-end via in-process ASGI test: `/start` → friendly intro; "Negroni spec" → Russell returns clean plain-text spec; bad secret → 403; `/whoami` → echoes chat_id.
 
+### Phase 5 (2026-02) — Raspberry Pi voice client
+- **Wake-word triggered Pi client** living at `/app/pi_client/`. Always-on, voice in the room.
+- **Files**:
+  - `russell_pi_client.py` — main loop (wake → record → STT → chat → TTS → repeat). Uses `pvporcupine` (custom "Hey Russell" .ppn from Picovoice console), `sounddevice` for mic/speaker I/O, the existing cloud `/api/voice/transcribe` for Whisper STT, `/api/chat` for the Claude brain, and local Piper for TTS (Aussie southern english male voice, offline).
+  - `audio_io.py` — VAD-bounded recording + WAV packaging + playback helpers.
+  - `tts_piper.py` — Piper voice wrapper (lazy-loaded; reused across syntheses).
+  - `requirements_pi.txt` — Pi-specific deps (requests, sounddevice, pvporcupine, piper-tts, numpy, soundfile, python-dotenv).
+  - `.env.example` — config template with all knobs (backend URL, Porcupine key + .ppn path, audio device indices, VAD thresholds, voice path).
+  - `systemd/russell.service` — autostart unit so Russell boots with the Pi.
+  - `run.sh` — convenience launcher (assumes ./venv).
+  - `README.md` — full setup walkthrough: Picovoice account → wake-word training → voice download → apt deps → venv → .env → run + systemd. Includes BT speaker pairing tips, VAD tuning, and a "going fully offline" roadmap.
+- **Channels page UI** updated with a new "Raspberry Pi — voice in the room" section with the 4-step setup distilled (links to Picovoice + HuggingFace, code blocks for venv setup and systemd install).
+- **One brain across all channels**: session_id="main" — Russell remembers what you told him on Telegram while you're standing in the kitchen.
+- Files compile cleanly; runtime test must happen on the Pi hardware itself (server doesn't have audio devices or wake-word libs).
+
 ## Prioritized Backlog
 ### P0 (Phase 5 — Raspberry Pi)
 - [ ] Pi client: wake word (Porcupine "Hey Sheldon") → record → hit cloud Brain API → audio playback

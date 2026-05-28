@@ -1,0 +1,19 @@
+[Unit]
+Description=Russell — AI Bartender voice client
+After=network-online.target sound.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+Group=audio
+WorkingDirectory=/opt/russell
+Environment="PATH=/opt/russell/venv/bin:/usr/bin:/bin"
+ExecStart=/opt/russell/venv/bin/python /opt/russell/russell_pi_client.py
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
