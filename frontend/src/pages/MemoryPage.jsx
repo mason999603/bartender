@@ -45,8 +45,8 @@ export default function MemoryPage() {
             <Toaster position="top-center" theme="dark" />
             <PageHeader
                 eyebrow="The Brain"
-                title="What Sheldon Remembers"
-                subtitle="Permanent notes Sheldon uses in every conversation. Your bar's vibe, your style, your dietary stuff — whatever you want him to know forever."
+                title="What Russell Remembers"
+                subtitle="Permanent notes Russell uses in every conversation. Your bar's vibe, your style, your dietary stuff — whatever you want him to know forever."
             />
 
             <div className="tool-card mb-6">
@@ -75,7 +75,7 @@ export default function MemoryPage() {
             {memories.length === 0 ? (
                 <div className="text-center py-16" style={{ color: "var(--text-secondary)" }}>
                     <Brain size={48} className="mx-auto mb-4 opacity-40" />
-                    No memories yet. Tell Sheldon what to remember.
+                    No memories yet. Tell Russell what to remember.
                 </div>
             ) : (
                 <div className="space-y-3">

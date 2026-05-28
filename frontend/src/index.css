@@ -210,7 +210,7 @@ input, textarea {
 }
 
 /* Chat bubbles */
-.bubble-sheldon {
+.bubble-russell {
     background: rgba(18, 18, 22, 0.85);
     border: 1px solid var(--border-subtle);
     border-radius: 18px 18px 18px 4px;

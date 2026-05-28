@@ -58,17 +58,17 @@ export default function ChatPage() {
 
         try {
             const res = await api.post("/chat", { session_id: "main", message: msg });
-            const sheldonReply = {
+            const russellReply = {
                 id: `s-${Date.now()}`,
                 session_id: "main",
-                role: "sheldon",
+                role: "russell",
                 content: res.data.reply,
                 timestamp: res.data.timestamp,
             };
-            setMessages((m) => [...m, sheldonReply]);
+            setMessages((m) => [...m, russellReply]);
         } catch (e) {
             console.error(e);
-            toast.error("Sheldon's down for a smoke. Try again in a sec.");
+            toast.error("Russell's down for a smoke. Try again in a sec.");
             setMessages((m) => m.filter((x) => x.id !== optimistic.id));
         } finally {
             setSending(false);
@@ -76,7 +76,7 @@ export default function ChatPage() {
     };
 
     const clearChat = async () => {
-        if (!window.confirm("Clear the whole chat? Sheldon's memories stay; only the conversation goes.")) return;
+        if (!window.confirm("Clear the whole chat? Russell's memories stay; only the conversation goes.")) return;
         try {
             await api.delete("/chat/history", { params: { session_id: "main" } });
             setMessages([]);
@@ -99,7 +99,7 @@ export default function ChatPage() {
                         className="font-serif font-light"
                         style={{ fontSize: "clamp(2.5rem, 6vw, 4rem)", lineHeight: 1, color: "var(--text-primary)" }}
                     >
-                        G'day. <span style={{ color: "var(--accent)" }}>I'm Sheldon.</span>
+                        G'day. <span style={{ color: "var(--accent)" }}>I'm Russell.</span>
                     </h1>
                     <p
                         className="mt-4 text-base sm:text-lg max-w-xl"
@@ -152,12 +152,12 @@ export default function ChatPage() {
                                 className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}
                                 data-testid={`msg-${m.role}`}
                             >
-                                {m.role === "sheldon" && (
+                                {m.role === "russell" && (
                                     <div className="mr-3 mt-1">
                                         <div className="brand-mark" style={{ width: 28, height: 28 }} />
                                     </div>
                                 )}
-                                <div className={m.role === "user" ? "bubble-user" : "bubble-sheldon"}>{m.content}</div>
+                                <div className={m.role === "user" ? "bubble-user" : "bubble-russell"}>{m.content}</div>
                             </div>
                         ))}
                         {sending && (
@@ -165,7 +165,7 @@ export default function ChatPage() {
                                 <div className="mr-3 mt-1">
                                     <div className="brand-mark" style={{ width: 28, height: 28 }} />
                                 </div>
-                                <div className="bubble-sheldon flex items-center gap-1.5 py-3 px-4">
+                                <div className="bubble-russell flex items-center gap-1.5 py-3 px-4">
                                     <span className="typing-dot" />
                                     <span className="typing-dot" />
                                     <span className="typing-dot" />
@@ -188,7 +188,7 @@ export default function ChatPage() {
                                 send();
                             }
                         }}
-                        placeholder="Ask Sheldon anything…"
+                        placeholder="Ask Russell anything…"
                         rows={1}
                         className="flex-1 bg-transparent border-none outline-none px-3 py-3 text-base resize-none"
                         style={{ color: "var(--text-primary)", maxHeight: 200 }}
@@ -210,8 +210,8 @@ export default function ChatPage() {
                             // Auto-send transcribed speech
                             send(text);
                         }}
-                        sheldonLastReply={
-                            messages.length > 0 && messages[messages.length - 1].role === "sheldon"
+                        russellLastReply={
+                            messages.length > 0 && messages[messages.length - 1].role === "russell"
                                 ? messages[messages.length - 1].content
                                 : ""
                         }

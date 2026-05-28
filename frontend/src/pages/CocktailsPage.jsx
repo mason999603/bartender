@@ -123,7 +123,7 @@ function CocktailModal({ cocktail, onClose, outOfStock = [] }) {
                                     {out && subs && subs.length > 0 && (
                                         <div className="mt-2 ml-1 pl-3 border-l-2" style={{ borderColor: "var(--accent)" }} data-testid={`sub-hint-${i}`}>
                                             <div className="label-tiny mb-1 flex items-center gap-1">
-                                                <ArrowsLeftRight size={11} weight="bold" /> Sheldon suggests
+                                                <ArrowsLeftRight size={11} weight="bold" /> Russell suggests
                                             </div>
                                             {subs.map((s, si) => (
                                                 <div key={si} className="text-sm mb-1">

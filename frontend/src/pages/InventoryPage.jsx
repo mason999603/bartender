@@ -55,7 +55,7 @@ export default function InventoryPage() {
             <PageHeader
                 eyebrow="Bar inventory"
                 title="What's on the back bar"
-                subtitle="Tracked items help Sheldon answer 'what can I make right now?' accurately. Off-tracker = assumed available."
+                subtitle="Tracked items help Russell answer 'what can I make right now?' accurately. Off-tracker = assumed available."
             />
 
             <div className="tool-card mb-6">

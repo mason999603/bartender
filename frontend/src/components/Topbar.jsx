@@ -20,7 +20,7 @@ export default function Topbar() {
                     <span className="brand-mark" />
                     <div className="flex flex-col leading-tight">
                         <span className="font-serif text-2xl tracking-tight" style={{ color: "var(--text-primary)" }}>
-                            Sheldon
+                            Russell
                         </span>
                         <span className="label-tiny">behind the stick</span>
                     </div>

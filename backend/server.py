@@ -1,4 +1,4 @@
-"""Sheldon — AI Bartender backend.
+"""Russell — AI Bartender backend.
 
 Phase 1: Web chat + cocktail brain + tools.
 Future: voice (Whisper/TTS), telephony (Twilio), Raspberry Pi deploy.
@@ -31,11 +31,11 @@ db = client[os.environ['DB_NAME']]
 EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY')
 CLAUDE_MODEL = "claude-sonnet-4-5-20250929"
 
-app = FastAPI(title="Sheldon — AI Bartender")
+app = FastAPI(title="Russell — AI Bartender")
 api_router = APIRouter(prefix="/api")
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger("sheldon")
+logger = logging.getLogger("russell")
 
 
 def now_iso() -> str:
@@ -58,7 +58,7 @@ class ChatResponse(BaseModel):
 class StoredMessage(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     session_id: str
-    role: str  # 'user' | 'sheldon'
+    role: str  # 'user' | 'russell'
     content: str
     timestamp: str = Field(default_factory=now_iso)
 
@@ -217,6 +217,13 @@ async def seed_db():
         await db.substitutions.insert_many([{**s, "id": str(uuid.uuid4())} for s in new_subs])
         logger.info(f"Seeded {len(new_subs)} new substitution entries")
 
+    # One-time migration: rename role "sheldon" → "russell" (Phase 4.5 rename)
+    rename_result = await db.chat_messages.update_many(
+        {"role": "sheldon"}, {"$set": {"role": "russell"}}
+    )
+    if rename_result.modified_count:
+        logger.info(f"Migrated {rename_result.modified_count} chat messages: role sheldon → russell")
+
 
 @app.on_event("shutdown")
 async def shutdown_db():
@@ -246,7 +253,7 @@ async def get_clash_warnings(ingredient_names: List[str]) -> List[dict]:
                 warnings.append(r)
     return warnings
 
-async def build_sheldon_system_prompt() -> str:
+async def build_russell_system_prompt() -> str:
     # Pull live context: memories, regulars, inventory, custom cocktails, subs
     memories = await db.memories.find({}, {"_id": 0}).sort("created_at", -1).limit(30).to_list(30)
     regulars = await db.regulars.find({}, {"_id": 0}).limit(30).to_list(30)
@@ -264,7 +271,7 @@ async def build_sheldon_system_prompt() -> str:
         [f"  - {s['ingredient']} → " + "; ".join(f"{x['name']} ({x.get('notes','')})" for x in s.get("subs", [])) for s in subs]
     ) or "  (none on file)"
 
-    return f"""You are SHELDON — a witty, dry, down-to-earth young Australian bartender. An up-and-comer with serious chops. You speak with subtle Aussie warmth (occasional "mate", "reckon", "no worries", "fair dinkum") but you DON'T overdo it or sound like a parody. Confident, never arrogant. Quick with a one-liner. Genuinely helpful.
+    return f"""You are RUSSELL — a witty, dry, down-to-earth young Australian bartender. An up-and-comer with serious chops. You speak with subtle Aussie warmth (occasional "mate", "reckon", "no worries", "fair dinkum") but you DON'T overdo it or sound like a parody. Confident, never arrogant. Quick with a one-liner. Genuinely helpful.
 
 You serve one user: a working bartender/mixologist. Treat them like a peer behind the stick, not a beginner.
 
@@ -313,7 +320,7 @@ Reference these naturally when relevant. Don't recite them verbatim — use them
 # ============================================================
 @api_router.get("/")
 async def root():
-    return {"app": "Sheldon", "status": "behind the stick"}
+    return {"app": "Russell", "status": "behind the stick"}
 
 
 # ---------- Voice (STT) ----------
@@ -355,7 +362,7 @@ async def voice_transcribe(audio: UploadFile = File(...)):
         if "budget" in msg and "exceeded" in msg:
             raise HTTPException(
                 429,
-                "Sheldon's tab is closed for the day, mate — Emergent LLM key budget exceeded.",
+                "Russell's tab is closed for the day, mate — Emergent LLM key budget exceeded.",
             )
         raise HTTPException(500, f"Transcription failed: {e}")
 
@@ -414,7 +421,7 @@ def _twiml(body_xml: str) -> Response:
 
 @api_router.post("/twilio/sms")
 async def twilio_sms(request: Request):
-    """Twilio webhook: inbound SMS → run through Sheldon's brain → respond with TwiML <Message>."""
+    """Twilio webhook: inbound SMS → run through Russell's brain → respond with TwiML <Message>."""
     form = dict(await request.form())
     await _validate_twilio(request, form)
 
@@ -426,12 +433,12 @@ async def twilio_sms(request: Request):
 
     logger.info(f"[Twilio SMS] from={from_number} body={body[:80]!r}")
     try:
-        reply = await chat_with_sheldon(session_id="main", user_text=body, channel="sms")
+        reply = await chat_with_russell(session_id="main", user_text=body, channel="sms")
     except HTTPException as he:
         return _twiml(f"<Message>{_xml_escape(he.detail)}</Message>")
     except Exception:
         logger.exception("SMS chat error")
-        return _twiml("<Message>Sheldon's a bit busy — try again in a sec.</Message>")
+        return _twiml("<Message>Russell's a bit busy — try again in a sec.</Message>")
 
     # SMS hard cap (Twilio handles segmenting up to 1600, but keep it sensible)
     if len(reply) > 1500:
@@ -447,7 +454,7 @@ async def twilio_voice(request: Request):
     from_number = form.get("From") or "unknown"
     logger.info(f"[Twilio Voice] inbound call from={from_number}")
 
-    greeting = _xml_escape("G'day, Sheldon here. What're we drinking tonight?")
+    greeting = _xml_escape("G'day, Russell here. What're we drinking tonight?")
     # Use Polly's en-AU male voice "Russell"; speechTimeout=auto lets caller finish naturally.
     body = (
         f'<Say voice="Polly.Russell" language="en-AU">{greeting}</Say>'
@@ -487,7 +494,7 @@ async def twilio_voice_gather(request: Request):
         return _twiml(body)
 
     try:
-        reply = await chat_with_sheldon(session_id="main", user_text=spoken, channel="voice")
+        reply = await chat_with_russell(session_id="main", user_text=spoken, channel="voice")
     except HTTPException as he:
         body = (
             f'<Say voice="Polly.Russell" language="en-AU">{_xml_escape(he.detail)}</Say>'
@@ -529,8 +536,8 @@ async def twilio_status():
 
 
 # ---------- Chat ----------
-async def chat_with_sheldon(session_id: str, user_text: str, channel: str = "web") -> str:
-    """Run a message through Sheldon's brain. Persists turns. `channel` adjusts reply style."""
+async def chat_with_russell(session_id: str, user_text: str, channel: str = "web") -> str:
+    """Run a message through Russell's brain. Persists turns. `channel` adjusts reply style."""
     if not EMERGENT_LLM_KEY:
         raise HTTPException(500, "EMERGENT_LLM_KEY not configured")
 
@@ -539,7 +546,7 @@ async def chat_with_sheldon(session_id: str, user_text: str, channel: str = "web
     await db.chat_messages.insert_one(user_msg.model_dump())
 
     # Build system prompt with live context + per-channel addendum
-    system_prompt = await build_sheldon_system_prompt()
+    system_prompt = await build_russell_system_prompt()
     if channel == "sms":
         system_prompt += (
             "\n\nCHANNEL: SMS — Keep your reply under 320 characters (2 SMS segments). "
@@ -567,7 +574,7 @@ async def chat_with_sheldon(session_id: str, user_text: str, channel: str = "web
 
     transcript_lines = []
     for m in recent:
-        speaker = "User" if m["role"] == "user" else "Sheldon"
+        speaker = "User" if m["role"] == "user" else "Russell"
         transcript_lines.append(f"{speaker}: {m['content']}")
     transcript = "\n".join(transcript_lines)
 
@@ -589,19 +596,19 @@ async def chat_with_sheldon(session_id: str, user_text: str, channel: str = "web
         if "budget" in msg and "exceeded" in msg:
             raise HTTPException(
                 429,
-                "Sheldon's tab is closed for the day, mate — Emergent LLM key budget exceeded. Top it up at Profile → Universal Key → Add Balance.",
+                "Russell's tab is closed for the day, mate — Emergent LLM key budget exceeded. Top it up at Profile → Universal Key → Add Balance.",
             )
         raise HTTPException(500, f"LLM error: {e}")
 
     reply_str = str(reply_text).strip()
-    sheldon_msg = StoredMessage(session_id=session_id, role="sheldon", content=reply_str)
-    await db.chat_messages.insert_one(sheldon_msg.model_dump())
+    russell_msg = StoredMessage(session_id=session_id, role="russell", content=reply_str)
+    await db.chat_messages.insert_one(russell_msg.model_dump())
     return reply_str
 
 
 @api_router.post("/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest):
-    reply = await chat_with_sheldon(req.session_id, req.message, channel="web")
+    reply = await chat_with_russell(req.session_id, req.message, channel="web")
     return ChatResponse(
         session_id=req.session_id,
         user_message=req.message,
@@ -747,7 +754,7 @@ async def get_substitutions(ingredient: str):
     if not doc:
         raise HTTPException(
             404,
-            "No substitutions on file for that one. Ask Sheldon in chat — he'll improvise."
+            "No substitutions on file for that one. Ask Russell in chat — he'll improvise."
         )
     return doc
 

@@ -67,7 +67,7 @@ function SubsLookup() {
             const res = await api.get(`/substitutions/${encodeURIComponent(q)}`);
             setResult(res.data);
         } catch (e) {
-            setError(e?.response?.data?.detail || "No subs on file for that one. Ask Sheldon in chat — he'll improvise.");
+            setError(e?.response?.data?.detail || "No subs on file for that one. Ask Russell in chat — he'll improvise.");
         } finally {
             setLoading(false);
         }

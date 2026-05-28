@@ -47,7 +47,7 @@ export default function PhonePage() {
             <Toaster position="top-center" theme="dark" />
             <PageHeader
                 eyebrow="Telephony"
-                title="Sheldon on the line"
+                title="Russell on the line"
                 subtitle="Set up a real phone number you can text and call. One brain across web, SMS and phone."
             />
 
@@ -60,7 +60,7 @@ export default function PhonePage() {
                         <CheckCircle size={28} weight="fill" style={{ color: "var(--accent)" }} />
                         <div>
                             <div className="font-serif text-xl" style={{ color: "var(--text-primary)" }}>
-                                Sheldon is live on the phone
+                                Russell is live on the phone
                             </div>
                             <div className="text-sm" style={{ color: "var(--text-secondary)" }}>
                                 Twilio configured. Text or call your number to chat with him.

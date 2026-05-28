@@ -53,7 +53,7 @@ export default function RegularsPage() {
             <PageHeader
                 eyebrow="Customer book"
                 title="The Regulars"
-                subtitle="Sheldon uses these notes when you ask 'what should Sarah drink tonight?'"
+                subtitle="Russell uses these notes when you ask 'what should Sarah drink tonight?'"
             >
                 <button onClick={() => setShowForm(!showForm)} className="btn-amber flex items-center gap-2" data-testid="add-regular-btn">
                     <Plus size={16} weight="bold" /> {showForm ? "Close" : "Add Regular"}
@@ -90,7 +90,7 @@ export default function RegularsPage() {
 
             {regulars.length === 0 ? (
                 <div className="text-center py-16" style={{ color: "var(--text-secondary)" }}>
-                    No regulars yet. Add one to build Sheldon's memory of your bar.
+                    No regulars yet. Add one to build Russell's memory of your bar.
                 </div>
             ) : (
                 <div className="grid sm:grid-cols-2 gap-4">

@@ -4,18 +4,18 @@ import { Microphone, MicrophoneSlash, Gear, SpeakerHigh, ArrowsClockwise, Lightn
 
 /**
  * Voice controls: push-to-talk OR continuous-with-VAD recording (Whisper STT),
- * plus free browser speechSynthesis playback of Sheldon's replies.
+ * plus free browser speechSynthesis playback of Russell's replies.
  *
  * Props:
  *   onTranscript(text)  — called when an utterance is transcribed
- *   sheldonLastReply    — string; when this changes and TTS is on, we speak it
+ *   russellLastReply    — string; when this changes and TTS is on, we speak it
  *   onListeningChange?  — optional callback (bool)
  */
-export default function VoiceControls({ onTranscript, sheldonLastReply, onListeningChange }) {
-    const [mode, setMode] = useState(() => localStorage.getItem("sheldon-mode") || "push"); // push | continuous
-    const [ttsEnabled, setTtsEnabled] = useState(() => localStorage.getItem("sheldon-tts") !== "off");
+export default function VoiceControls({ onTranscript, russellLastReply, onListeningChange }) {
+    const [mode, setMode] = useState(() => localStorage.getItem("russell-mode") || "push"); // push | continuous
+    const [ttsEnabled, setTtsEnabled] = useState(() => localStorage.getItem("russell-tts") !== "off");
     const [voices, setVoices] = useState([]);
-    const [selectedVoiceName, setSelectedVoiceName] = useState(() => localStorage.getItem("sheldon-voice") || "");
+    const [selectedVoiceName, setSelectedVoiceName] = useState(() => localStorage.getItem("russell-voice") || "");
     const [isRecording, setIsRecording] = useState(false);
     const [isListening, setIsListening] = useState(false); // continuous-mode session on
     const [transcribing, setTranscribing] = useState(false);
@@ -59,14 +59,14 @@ export default function VoiceControls({ onTranscript, sheldonLastReply, onListen
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
-    // Speak Sheldon's reply when it changes
+    // Speak Russell's reply when it changes
     useEffect(() => {
-        if (!ttsEnabled || !sheldonLastReply || sheldonLastReply === lastSpokenRef.current) return;
+        if (!ttsEnabled || !russellLastReply || russellLastReply === lastSpokenRef.current) return;
         if (!("speechSynthesis" in window)) return;
-        lastSpokenRef.current = sheldonLastReply;
+        lastSpokenRef.current = russellLastReply;
         try {
             window.speechSynthesis.cancel();
-            const utter = new SpeechSynthesisUtterance(sheldonLastReply);
+            const utter = new SpeechSynthesisUtterance(russellLastReply);
             const v = voices.find((x) => x.name === selectedVoiceName);
             if (v) utter.voice = v;
             utter.rate = 1.02;
@@ -75,13 +75,13 @@ export default function VoiceControls({ onTranscript, sheldonLastReply, onListen
         } catch (e) {
             console.error("TTS failed", e);
         }
-    }, [sheldonLastReply, ttsEnabled, voices, selectedVoiceName]);
+    }, [russellLastReply, ttsEnabled, voices, selectedVoiceName]);
 
     // Persist settings
     useEffect(() => {
-        localStorage.setItem("sheldon-mode", mode);
-        localStorage.setItem("sheldon-tts", ttsEnabled ? "on" : "off");
-        if (selectedVoiceName) localStorage.setItem("sheldon-voice", selectedVoiceName);
+        localStorage.setItem("russell-mode", mode);
+        localStorage.setItem("russell-tts", ttsEnabled ? "on" : "off");
+        if (selectedVoiceName) localStorage.setItem("russell-voice", selectedVoiceName);
     }, [mode, ttsEnabled, selectedVoiceName]);
 
     // Tell parent when "listening" state changes (used for visual cues)
@@ -109,7 +109,7 @@ export default function VoiceControls({ onTranscript, sheldonLastReply, onListen
     const startRecording = async () => {
         if (isRecording) return;
         try {
-            // When Sheldon's speaking, hush him while user talks
+            // When Russell's speaking, hush him while user talks
             if ("speechSynthesis" in window) window.speechSynthesis.cancel();
 
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -417,7 +417,7 @@ export default function VoiceControls({ onTranscript, sheldonLastReply, onListen
                     {/* TTS */}
                     <div className="mb-4">
                         <div className="flex items-center justify-between mb-2">
-                            <div className="label-tiny">Sheldon speaks his replies</div>
+                            <div className="label-tiny">Russell speaks his replies</div>
                             <button
                                 onClick={() => setTtsEnabled((v) => !v)}
                                 className={`px-3 py-1 rounded-full text-xs font-semibold ${ttsEnabled ? "" : "opacity-50"}`}
@@ -450,7 +450,7 @@ export default function VoiceControls({ onTranscript, sheldonLastReply, onListen
                         </select>
                         {voices.find((v) => v.lang.startsWith("en-AU")) ? (
                             <p className="text-xs mt-2" style={{ color: "var(--text-muted)" }}>
-                                Aussie voice detected — Sheldon sounds at home.
+                                Aussie voice detected — Russell sounds at home.
                             </p>
                         ) : (
                             <p className="text-xs mt-2" style={{ color: "var(--text-muted)" }}>
@@ -461,7 +461,7 @@ export default function VoiceControls({ onTranscript, sheldonLastReply, onListen
                             onClick={() => {
                                 if (!("speechSynthesis" in window)) return;
                                 window.speechSynthesis.cancel();
-                                const u = new SpeechSynthesisUtterance("G'day mate. Sheldon here. What're we drinking?");
+                                const u = new SpeechSynthesisUtterance("G'day mate. Russell here. What're we drinking?");
                                 const v = voices.find((x) => x.name === selectedVoiceName);
                                 if (v) u.voice = v;
                                 u.rate = 1.02;

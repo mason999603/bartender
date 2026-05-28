@@ -1,4 +1,4 @@
-"""Seed data for Sheldon — cocktails, ingredients, clash rules, flavour profiles."""
+"""Seed data for Russell — cocktails, ingredients, clash rules, flavour profiles."""
 
 # Ingredient knowledge base — flavour profiles & basic chemistry tags
 INGREDIENTS = [
