@@ -1,0 +1,36 @@
+{
+  "summary": "Phase 2 (Sheldon AI Bartender) regression + new-feature testing complete. Backend: 29/29 pytest (10 new Phase 2 + 19 regression) PASSED. Frontend: all 5 Phase 2 UI behaviours verified end-to-end. LLM budget issue from iteration 1 has resolved — chat tests (incl. proactive Cointreau→Grand Marnier swap) all green.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_phase2.py",
+    "/app/backend/tests/test_sheldon_api.py",
+    "/app/test_reports/pytest/phase2_results.xml",
+    "/app/test_reports/pytest/regression_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py grew from ~600 → ~700 lines; still readable but Phase 3 (voice/telephony) should trigger a split into routers/ (chat.py, cocktails.py, substitutions.py, tools.py, crud.py).",
+    "build_sheldon_system_prompt() now runs 6 DB queries per chat call (memories, regulars, inventory in, inventory out, custom cocktails, substitutions). Fine for single-user; if multi-tenant, batch with $facet or cache 30-60s.",
+    "GET /api/substitutions/{ingredient} does case-insensitive exact-match then partial-match — good UX. Partial-match could surprise users (e.g. 'lime' matches 'Lime Juice'); consider returning a list when partial.",
+    "Frontend chip cycle uses class strings ('badge', 'badge-amber', 'badge-danger') — testable. Search input switches placeholder to 'Search disabled while flavour filter active' which is excellent UX.",
+    "All API endpoints correctly project away _id. No regressions vs iteration 1."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_phase2.py (new — 10 tests)"
+  ],
+  "success_rate": {"backend": "100% (29/29)", "frontend": "100% (all 5 Phase 2 UI checks)"},
+  "test_credentials": "N/A — single-user app, no auth.",
+  "seed_data_creation": "Upsert-by-name seeding is idempotent and verified. 44 cocktails, 65+ ingredients, 14 clash rules, 22 substitution entries seeded. Test inventory item Cointreau was created (then cleaned up) for chat-sub and modal tests.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Phase 2 is solid. Verified: /api/cocktails returns 44; /api/cocktails/by-flavour with smoky+citrus exclude=sweet returns Naked&Famous + Penicillin both with include_matches=2 and no sweet results; bitter include returns >=5; empty include+exclude returns []; /api/substitutions returns 22 sorted; /api/substitutions/Cointreau returns 3 subs with notes; lowercase resolves; nonexistent → 404 with 'No substitutions on file' message; chat with Cointreau 86'd correctly mentions Grand Marnier/Triple Sec swap. Frontend: Library subtitle '44 specs and counting' ✓, 18 flavour chips ✓, chip cycle badge→badge-amber→badge-danger(line-through)→badge ✓, search disabled with custom placeholder while flavour filter active ✓, Clear button resets ✓, Subs tab shows 22 quick tags ✓, Cointreau lookup returns Grand Marnier+Triple Sec+Orange Curaçao with notes ✓, Margarita modal with Cointreau 86'd shows line-through + 86'D badge + 'SHELDON SUGGESTS' sub-list ✓.",
+  "rca of the issue": "No outstanding issues. Iteration 1's LLM budget cap (litellm.BadRequestError) no longer reproduces — chat endpoint works reliably across consecutive calls and the new build_sheldon_system_prompt now includes the substitutions cheat-sheet, which Claude uses proactively when an ingredient is 86'd."
+}

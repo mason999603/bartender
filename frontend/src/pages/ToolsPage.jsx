@@ -2,11 +2,12 @@ import React, { useState, useEffect } from "react";
 import { api } from "@/lib/api";
 import PageHeader from "@/components/PageHeader";
 import { Toaster, toast } from "sonner";
-import { Warning, Flask, Calculator, CurrencyDollar, MagicWand, Plus, X, CheckCircle } from "@phosphor-icons/react";
+import { Warning, Flask, Calculator, CurrencyDollar, MagicWand, Plus, X, CheckCircle, ArrowsLeftRight } from "@phosphor-icons/react";
 
 const TABS = [
     { key: "make", label: "What Can I Make", icon: MagicWand },
     { key: "clash", label: "Clash Check", icon: Warning },
+    { key: "subs", label: "Subs", icon: ArrowsLeftRight },
     { key: "abv", label: "ABV", icon: Flask },
     { key: "batch", label: "Batching", icon: Calculator },
     { key: "cost", label: "Cost", icon: CurrencyDollar },
@@ -36,9 +37,110 @@ export default function ToolsPage() {
             <div className="fade-in" key={tab}>
                 {tab === "make" && <WhatCanIMake />}
                 {tab === "clash" && <ClashCheck />}
+                {tab === "subs" && <SubsLookup />}
                 {tab === "abv" && <AbvCalc />}
                 {tab === "batch" && <BatchCalc />}
                 {tab === "cost" && <CostCalc />}
+            </div>
+        </div>
+    );
+}
+
+function SubsLookup() {
+    const [query, setQuery] = useState("");
+    const [result, setResult] = useState(null);
+    const [error, setError] = useState("");
+    const [loading, setLoading] = useState(false);
+    const [allSubs, setAllSubs] = useState([]);
+
+    useEffect(() => {
+        api.get("/substitutions").then((r) => setAllSubs(r.data || []));
+    }, []);
+
+    const lookup = async (name) => {
+        const q = (name ?? query).trim();
+        if (!q) return;
+        setLoading(true);
+        setError("");
+        setResult(null);
+        try {
+            const res = await api.get(`/substitutions/${encodeURIComponent(q)}`);
+            setResult(res.data);
+        } catch (e) {
+            setError(e?.response?.data?.detail || "No subs on file for that one. Ask Sheldon in chat — he'll improvise.");
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    return (
+        <div className="grid lg:grid-cols-2 gap-6">
+            <div className="tool-card">
+                <div className="label-tiny mb-3">Look up swaps for an ingredient</div>
+                <div className="flex gap-2 mb-4">
+                    <input
+                        className="input-dark flex-1"
+                        placeholder="e.g. Cointreau"
+                        value={query}
+                        onChange={(e) => setQuery(e.target.value)}
+                        onKeyDown={(e) => e.key === "Enter" && lookup()}
+                        data-testid="subs-input"
+                    />
+                    <button onClick={() => lookup()} className="btn-amber" data-testid="subs-lookup">
+                        Find swaps
+                    </button>
+                </div>
+                <div className="label-tiny mb-2 mt-6">Browse all on file</div>
+                <div className="flex flex-wrap gap-2">
+                    {allSubs.map((s) => (
+                        <button
+                            key={s.ingredient}
+                            onClick={() => {
+                                setQuery(s.ingredient);
+                                lookup(s.ingredient);
+                            }}
+                            className="badge"
+                            style={{ cursor: "pointer" }}
+                            data-testid={`subs-quick-${s.ingredient.toLowerCase().replace(/\s+/g, "-")}`}
+                        >
+                            {s.ingredient}
+                        </button>
+                    ))}
+                </div>
+            </div>
+            <div>
+                <div className="label-tiny mb-3">Suggestions</div>
+                {loading && <div style={{ color: "var(--text-secondary)" }}>Thinking…</div>}
+                {error && (
+                    <div className="tool-card text-sm" style={{ color: "var(--text-secondary)" }}>
+                        {error}
+                    </div>
+                )}
+                {result && (
+                    <div className="tool-card" data-testid="subs-result">
+                        <div className="label-tiny mb-1">In place of</div>
+                        <h3 className="font-serif text-2xl mb-4" style={{ color: "var(--accent)" }}>
+                            {result.ingredient}
+                        </h3>
+                        <div className="space-y-3">
+                            {result.subs.map((s, i) => (
+                                <div key={i} className="border-l-2 pl-3" style={{ borderColor: "var(--accent)" }}>
+                                    <div className="font-medium" style={{ color: "var(--text-primary)" }}>
+                                        {s.name}
+                                    </div>
+                                    <div className="text-sm" style={{ color: "var(--text-secondary)" }}>
+                                        {s.notes}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
+                {!loading && !error && !result && (
+                    <div className="tool-card text-sm" style={{ color: "var(--text-secondary)" }}>
+                        Hit a tag or type an ingredient. Try Cointreau, Lime Juice, or Sweet Vermouth.
+                    </div>
+                )}
             </div>
         </div>
     );

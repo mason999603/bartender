@@ -1,11 +1,51 @@
 import React, { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import PageHeader from "@/components/PageHeader";
-import { MagnifyingGlass, X, Plus, Flask } from "@phosphor-icons/react";
+import { MagnifyingGlass, X, Plus, Flask, ArrowsLeftRight } from "@phosphor-icons/react";
 import { Toaster, toast } from "sonner";
 
-function CocktailModal({ cocktail, onClose }) {
+const FLAVOUR_CHIPS = [
+    "citrus", "bitter", "sweet", "smoky", "herbal", "fruity",
+    "spicy", "floral", "warm", "tart", "creamy", "tropical",
+    "nutty", "fizzy", "dry", "refreshing", "rich", "complex",
+];
+
+function CocktailModal({ cocktail, onClose, outOfStock = [] }) {
+    const [subHints, setSubHints] = useState({}); // { ingredientName: [subs] }
+
+    useEffect(() => {
+        if (!cocktail) return;
+        // For each ingredient in this spec that's 86'd, fetch subs.
+        const need = (cocktail.ingredients || [])
+            .map((i) => i.name)
+            .filter((n) =>
+                outOfStock.some((o) => o.toLowerCase().includes(n.toLowerCase()) || n.toLowerCase().includes(o.toLowerCase()))
+            );
+        if (need.length === 0) {
+            setSubHints({});
+            return;
+        }
+        let cancelled = false;
+        Promise.all(
+            need.map((n) =>
+                api.get(`/substitutions/${encodeURIComponent(n)}`).then((r) => [n, r.data.subs]).catch(() => [n, null])
+            )
+        ).then((pairs) => {
+            if (cancelled) return;
+            const map = {};
+            for (const [n, subs] of pairs) if (subs) map[n] = subs;
+            setSubHints(map);
+        });
+        return () => {
+            cancelled = true;
+        };
+    }, [cocktail, outOfStock]);
+
     if (!cocktail) return null;
+
+    const isOut = (name) =>
+        outOfStock.some((o) => o.toLowerCase().includes(name.toLowerCase()) || name.toLowerCase().includes(o.toLowerCase()));
+
     return (
         <div
             className="fixed inset-0 z-50 flex items-center justify-center p-4 fade-in"
@@ -59,21 +99,43 @@ function CocktailModal({ cocktail, onClose }) {
                 <div className="mb-6">
                     <div className="label-tiny mb-3">Spec</div>
                     <div className="space-y-2">
-                        {cocktail.ingredients?.map((ing, i) => (
-                            <div key={i} className="flex items-baseline justify-between gap-4 border-b border-white/5 pb-2">
-                                <div>
-                                    <span className="font-medium">{ing.name}</span>
-                                    {ing.notes && (
-                                        <span className="ml-2 text-xs" style={{ color: "var(--text-secondary)" }}>
-                                            ({ing.notes})
-                                        </span>
+                        {cocktail.ingredients?.map((ing, i) => {
+                            const out = isOut(ing.name);
+                            const subs = subHints[ing.name];
+                            return (
+                                <div key={i} className="border-b border-white/5 pb-2">
+                                    <div className="flex items-baseline justify-between gap-4">
+                                        <div>
+                                            <span className={`font-medium ${out ? "line-through" : ""}`} style={out ? { color: "var(--text-secondary)" } : {}}>
+                                                {ing.name}
+                                            </span>
+                                            {out && <span className="badge badge-danger ml-2">86'd</span>}
+                                            {ing.notes && (
+                                                <span className="ml-2 text-xs" style={{ color: "var(--text-secondary)" }}>
+                                                    ({ing.notes})
+                                                </span>
+                                            )}
+                                        </div>
+                                        <div className="font-serif text-lg" style={{ color: "var(--accent)" }}>
+                                            {ing.amount_ml > 0 ? `${ing.amount_ml} ml` : "—"}
+                                        </div>
+                                    </div>
+                                    {out && subs && subs.length > 0 && (
+                                        <div className="mt-2 ml-1 pl-3 border-l-2" style={{ borderColor: "var(--accent)" }} data-testid={`sub-hint-${i}`}>
+                                            <div className="label-tiny mb-1 flex items-center gap-1">
+                                                <ArrowsLeftRight size={11} weight="bold" /> Sheldon suggests
+                                            </div>
+                                            {subs.map((s, si) => (
+                                                <div key={si} className="text-sm mb-1">
+                                                    <span style={{ color: "var(--accent)" }}>{s.name}</span>
+                                                    <span style={{ color: "var(--text-secondary)" }}> — {s.notes}</span>
+                                                </div>
+                                            ))}
+                                        </div>
                                     )}
                                 </div>
-                                <div className="font-serif text-lg" style={{ color: "var(--accent)" }}>
-                                    {ing.amount_ml > 0 ? `${ing.amount_ml} ml` : "—"}
-                                </div>
-                            </div>
-                        ))}
+                            );
+                        })}
                     </div>
                 </div>
 
@@ -91,11 +153,29 @@ function CocktailModal({ cocktail, onClose }) {
 export default function CocktailsPage() {
     const [cocktails, setCocktails] = useState([]);
     const [search, setSearch] = useState("");
+    const [flavourState, setFlavourState] = useState({}); // { citrus: 'include' | 'exclude' | undefined }
     const [selected, setSelected] = useState(null);
     const [loading, setLoading] = useState(true);
     const [showCreate, setShowCreate] = useState(false);
+    const [outOfStock, setOutOfStock] = useState([]);
 
-    const load = async (q = "") => {
+    // Cycle chip state: undefined → include → exclude → undefined
+    const toggleChip = (flavour) => {
+        setFlavourState((prev) => {
+            const cur = prev[flavour];
+            const next = cur === undefined ? "include" : cur === "include" ? "exclude" : undefined;
+            const newState = { ...prev };
+            if (next === undefined) delete newState[flavour];
+            else newState[flavour] = next;
+            return newState;
+        });
+    };
+
+    const includes = Object.keys(flavourState).filter((k) => flavourState[k] === "include");
+    const excludes = Object.keys(flavourState).filter((k) => flavourState[k] === "exclude");
+    const flavourActive = includes.length > 0 || excludes.length > 0;
+
+    const loadByName = async (q = "") => {
         setLoading(true);
         try {
             const res = await api.get("/cocktails", { params: { search: q } });
@@ -107,14 +187,42 @@ export default function CocktailsPage() {
         }
     };
 
+    const loadByFlavour = async () => {
+        setLoading(true);
+        try {
+            const res = await api.post("/cocktails/by-flavour", { include: includes, exclude: excludes });
+            // unwrap from { cocktail, ... } shape
+            setCocktails((res.data || []).map((r) => r.cocktail));
+        } catch (e) {
+            console.error(e);
+            toast.error("Flavour search failed");
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    // Initial load + load 86'd inventory once
     useEffect(() => {
-        load();
+        loadByName();
+        api.get("/inventory").then((r) => {
+            setOutOfStock((r.data || []).filter((i) => !i.in_stock).map((i) => i.name));
+        });
     }, []);
 
+    // React to either search OR flavour state
     useEffect(() => {
-        const t = setTimeout(() => load(search), 250);
+        const t = setTimeout(() => {
+            if (flavourActive) loadByFlavour();
+            else loadByName(search);
+        }, 250);
         return () => clearTimeout(t);
-    }, [search]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [search, flavourState]);
+
+    const clearFilters = () => {
+        setFlavourState({});
+        setSearch("");
+    };
 
     return (
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
@@ -122,7 +230,7 @@ export default function CocktailsPage() {
             <PageHeader
                 eyebrow="Cocktail Library"
                 title="The Book"
-                subtitle="Classics, modern classics, your own specs. Tap a card for the full build."
+                subtitle="44 specs and counting. Tap a card for the full build. Search by name, or filter by flavour."
             >
                 <button
                     onClick={() => setShowCreate(true)}
@@ -133,7 +241,7 @@ export default function CocktailsPage() {
                 </button>
             </PageHeader>
 
-            <div className="relative mb-6">
+            <div className="relative mb-4">
                 <MagnifyingGlass
                     size={18}
                     className="absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none"
@@ -141,18 +249,56 @@ export default function CocktailsPage() {
                 />
                 <input
                     className="input-dark pl-12"
-                    placeholder="Search by name…"
+                    placeholder={flavourActive ? "Search disabled while flavour filter active" : "Search by name…"}
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
+                    disabled={flavourActive}
                     data-testid="cocktail-search"
                 />
+            </div>
+
+            <div className="mb-6">
+                <div className="flex items-center justify-between mb-2">
+                    <div className="label-tiny">Flavour filter — tap to include, again to exclude</div>
+                    {flavourActive && (
+                        <button onClick={clearFilters} className="text-xs flex items-center gap-1" style={{ color: "var(--text-secondary)" }} data-testid="clear-flavour-filters">
+                            <X size={12} /> Clear
+                        </button>
+                    )}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                    {FLAVOUR_CHIPS.map((f) => {
+                        const state = flavourState[f];
+                        const cls =
+                            state === "include"
+                                ? "badge-amber"
+                                : state === "exclude"
+                                ? "badge-danger"
+                                : "";
+                        return (
+                            <button
+                                key={f}
+                                onClick={() => toggleChip(f)}
+                                className={`badge ${cls}`}
+                                style={{
+                                    cursor: "pointer",
+                                    textDecoration: state === "exclude" ? "line-through" : "none",
+                                }}
+                                data-testid={`flavour-chip-${f}`}
+                            >
+                                {state === "exclude" ? "− " : state === "include" ? "+ " : ""}
+                                {f}
+                            </button>
+                        );
+                    })}
+                </div>
             </div>
 
             {loading ? (
                 <div className="text-center py-16" style={{ color: "var(--text-secondary)" }}>Polishing glassware…</div>
             ) : cocktails.length === 0 ? (
                 <div className="text-center py-16" style={{ color: "var(--text-secondary)" }}>
-                    No drinks match. Try a different search.
+                    {flavourActive ? "No drinks match those flavours. Try loosening up." : "No drinks match. Try a different search."}
                 </div>
             ) : (
                 <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
@@ -182,14 +328,14 @@ export default function CocktailsPage() {
                 </div>
             )}
 
-            <CocktailModal cocktail={selected} onClose={() => setSelected(null)} />
+            <CocktailModal cocktail={selected} onClose={() => setSelected(null)} outOfStock={outOfStock} />
             {showCreate && (
                 <CreateCocktailModal
                     onClose={() => setShowCreate(false)}
                     onCreated={() => {
                         setShowCreate(false);
                         toast.success("Spec saved");
-                        load(search);
+                        loadByName(search);
                     }}
                 />
             )}

@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 
 from emergentintegrations.llm.chat import LlmChat, UserMessage
 
-from seed_data import INGREDIENTS, COCKTAILS, CLASH_RULES
+from seed_data import INGREDIENTS, COCKTAILS, CLASH_RULES, SUBSTITUTIONS
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -95,6 +95,11 @@ class CocktailCreate(BaseModel):
 class IngredientsQuery(BaseModel):
     ingredients: List[str]
 
+class FlavourQuery(BaseModel):
+    include: List[str] = []
+    exclude: List[str] = []
+    limit: int = 30
+
 class CompatibilityQuery(BaseModel):
     ingredients: List[str]
 
@@ -161,18 +166,23 @@ class InventoryCreate(BaseModel):
 
 
 # ============================================================
-# Seeding
+# Seeding (upsert-by-name so new data lands cleanly across restarts)
 # ============================================================
 @app.on_event("startup")
 async def seed_db():
-    # Ingredients
-    if await db.ingredients.count_documents({}) == 0:
-        await db.ingredients.insert_many([{**i, "id": str(uuid.uuid4())} for i in INGREDIENTS])
-        logger.info(f"Seeded {len(INGREDIENTS)} ingredients")
-    # Cocktails
-    if await db.cocktails.count_documents({"is_custom": False}) == 0:
+    # Ingredients — upsert by name
+    existing_ing = {i["name"] for i in await db.ingredients.find({}, {"name": 1, "_id": 0}).to_list(2000)}
+    new_ing = [i for i in INGREDIENTS if i["name"] not in existing_ing]
+    if new_ing:
+        await db.ingredients.insert_many([{**i, "id": str(uuid.uuid4())} for i in new_ing])
+        logger.info(f"Seeded {len(new_ing)} new ingredients")
+
+    # Cocktails — upsert by name (non-custom only)
+    existing_ck = {c["name"] for c in await db.cocktails.find({"is_custom": False}, {"name": 1, "_id": 0}).to_list(2000)}
+    new_ck = [c for c in COCKTAILS if c["name"] not in existing_ck]
+    if new_ck:
         docs = []
-        for c in COCKTAILS:
+        for c in new_ck:
             docs.append({
                 "id": str(uuid.uuid4()),
                 "name": c["name"],
@@ -189,11 +199,21 @@ async def seed_db():
                 "created_at": now_iso(),
             })
         await db.cocktails.insert_many(docs)
-        logger.info(f"Seeded {len(docs)} cocktails")
-    # Clash rules
-    if await db.clash_rules.count_documents({}) == 0:
-        await db.clash_rules.insert_many([{**r, "id": str(uuid.uuid4())} for r in CLASH_RULES])
-        logger.info(f"Seeded {len(CLASH_RULES)} clash rules")
+        logger.info(f"Seeded {len(docs)} new cocktails")
+
+    # Clash rules — upsert by (a,b)
+    existing_clash = {(r["a"], r["b"]) for r in await db.clash_rules.find({}, {"a": 1, "b": 1, "_id": 0}).to_list(2000)}
+    new_rules = [r for r in CLASH_RULES if (r["a"], r["b"]) not in existing_clash]
+    if new_rules:
+        await db.clash_rules.insert_many([{**r, "id": str(uuid.uuid4())} for r in new_rules])
+        logger.info(f"Seeded {len(new_rules)} new clash rules")
+
+    # Substitutions — upsert by ingredient name
+    existing_subs = {s["ingredient"] for s in await db.substitutions.find({}, {"ingredient": 1, "_id": 0}).to_list(2000)}
+    new_subs = [s for s in SUBSTITUTIONS if s["ingredient"] not in existing_subs]
+    if new_subs:
+        await db.substitutions.insert_many([{**s, "id": str(uuid.uuid4())} for s in new_subs])
+        logger.info(f"Seeded {len(new_subs)} new substitution entries")
 
 
 @app.on_event("shutdown")
@@ -225,35 +245,42 @@ async def get_clash_warnings(ingredient_names: List[str]) -> List[dict]:
     return warnings
 
 async def build_sheldon_system_prompt() -> str:
-    # Pull live context: memories, regulars, inventory in-stock, custom cocktails
+    # Pull live context: memories, regulars, inventory, custom cocktails, subs
     memories = await db.memories.find({}, {"_id": 0}).sort("created_at", -1).limit(30).to_list(30)
     regulars = await db.regulars.find({}, {"_id": 0}).limit(30).to_list(30)
     inventory_in = [i["name"] for i in await db.inventory.find({"in_stock": True}, {"_id": 0}).to_list(200)]
+    inventory_out = [i["name"] for i in await db.inventory.find({"in_stock": False}, {"_id": 0}).to_list(200)]
     custom = await db.cocktails.find({"is_custom": True}, {"_id": 0}).limit(30).to_list(30)
+    subs = await db.substitutions.find({}, {"_id": 0}).to_list(500)
 
     mem_block = "\n".join([f"  - {m['key']}: {m['value']}" for m in memories]) or "  (no saved memories yet)"
     reg_block = "\n".join([f"  - {r['name']}: likes={r.get('likes', [])}, dislikes={r.get('dislikes', [])}, favs={r.get('favourite_cocktails', [])}, notes={r.get('notes', '')}" for r in regulars]) or "  (no regulars saved yet)"
-    inv_block = ", ".join(inventory_in) if inventory_in else "(no inventory tracked yet — assume a well-stocked bar)"
+    inv_in_block = ", ".join(inventory_in) if inventory_in else "(no inventory tracked yet — assume a well-stocked bar)"
+    inv_out_block = ", ".join(inventory_out) if inventory_out else "(nothing 86'd)"
     custom_block = "\n".join([f"  - {c['name']}: {', '.join(i['name'] + ' ' + str(i.get('amount_ml',0)) + 'ml' for i in c.get('ingredients', []))}" for c in custom]) or "  (no custom specs saved yet)"
+    subs_block = "\n".join(
+        [f"  - {s['ingredient']} → " + "; ".join(f"{x['name']} ({x.get('notes','')})" for x in s.get("subs", [])) for s in subs]
+    ) or "  (none on file)"
 
     return f"""You are SHELDON — a witty, dry, down-to-earth young Australian bartender. An up-and-comer with serious chops. You speak with subtle Aussie warmth (occasional "mate", "reckon", "no worries", "fair dinkum") but you DON'T overdo it or sound like a parody. Confident, never arrogant. Quick with a one-liner. Genuinely helpful.
 
 You serve one user: a working bartender/mixologist. Treat them like a peer behind the stick, not a beginner.
 
 YOUR KNOWLEDGE:
-- Encyclopedic on spirits, liqueurs, modifiers, bitters, mixers, syrups — their flavour profiles, ABVs, production methods, regional variations.
-- Cocktail chemistry: emulsion, dilution, acidity, sugar, bitterness balance. Know what clashes and why (e.g., dairy curdles with citrus/quinine/wine; absinthe lourches at high water content; cream + Campari is rare for good reason).
+- Encyclopedic on spirits, liqueurs, modifiers, bitters, mixers, syrups — flavour profiles, ABVs, production methods, regional variations.
+- Cocktail chemistry: emulsion, dilution, acidity, sugar, bitterness balance. You know what clashes and why (dairy curdles with citrus/quinine/wine; absinthe louches at high water content; cream + Campari is rare for good reason).
 - Classics (IBA list), modern classics, tiki, low-ABV, zero-proof builds.
 - Technique: shake hard vs gentle, dry shake order, stir vs shake choice, ice formats, glassware, garnish, dilution targets.
-- Service knowledge: batching, pre-dilution, oleo saccharum, fat-washing, clarification, infusions.
+- Service: batching, pre-dilution, oleo saccharum, fat-washing, clarification, infusions.
 
 BEHAVIOUR RULES:
 - If the user describes a build with a fatal chemistry clash, tell them straight (with the reason) and offer the fix.
 - When suggesting cocktails, give a proper SPEC (with ml measurements) and method when relevant.
 - When the user asks "what can I make" — check the inventory below (and assume the rest of a normal bar is available unless they say otherwise).
-- If a question is outside cocktails/spirits/service, answer it briefly and humanly — you're a mate, not a chatbot.
+- **If a recipe you're suggesting needs something 86'd (see "Currently 86'd" below), PROACTIVELY swap it using the Substitutions cheat-sheet** and tell the user what you swapped and why. Don't make them ask.
+- If a question is outside cocktails/spirits/service, answer briefly and humanly — you're a mate, not a chatbot.
 - If you genuinely don't know, say so.
-- KEEP REPLIES TIGHT. No essay-length answers unless asked. Bartender-style: clear, fast, useful.
+- KEEP REPLIES TIGHT. Bartender-style: clear, fast, useful.
 
 CURRENT CONTEXT THE USER HAS SAVED:
 
@@ -263,11 +290,17 @@ CURRENT CONTEXT THE USER HAS SAVED:
 [Regulars / customer preferences]
 {reg_block}
 
-[Current in-stock inventory]
-{inv_block}
+[Currently in stock]
+{inv_in_block}
+
+[Currently 86'd — DO NOT use these; substitute proactively]
+{inv_out_block}
 
 [User's custom cocktail specs]
 {custom_block}
+
+[Substitution cheat-sheet — use these when an ingredient is 86'd or the user asks for swaps]
+{subs_block}
 
 Reference these naturally when relevant. Don't recite them verbatim — use them like a real bartender remembering their bar.
 """
@@ -432,6 +465,63 @@ async def search_by_ingredients(q: IngredientsQuery):
             })
     scored.sort(key=lambda x: (-x["match_ratio"], x["cocktail"]["name"]))
     return scored
+
+
+@api_router.post("/cocktails/by-flavour")
+async def by_flavour(q: FlavourQuery):
+    """Search cocktails by flavour profile. Returns matches sorted by include-count desc."""
+    include = [f.lower().strip() for f in q.include if f.strip()]
+    exclude = [f.lower().strip() for f in q.exclude if f.strip()]
+    if not include and not exclude:
+        return []
+
+    docs = await db.cocktails.find({}, {"_id": 0}).to_list(1000)
+
+    def has_flavour(profile_terms, target):
+        return any(target in p or p in target for p in profile_terms)
+
+    scored = []
+    for d in docs:
+        profile = [p.lower() for p in d.get("flavor_profile", [])]
+        if not profile:
+            continue
+        inc = sum(1 for f in include if has_flavour(profile, f))
+        exc = sum(1 for f in exclude if has_flavour(profile, f))
+        if include and inc == 0:
+            continue
+        if exc > 0:
+            continue
+        scored.append({
+            "cocktail": d,
+            "include_matches": inc,
+            "matched_flavours": [f for f in include if has_flavour(profile, f)],
+        })
+    scored.sort(key=lambda x: (-x["include_matches"], x["cocktail"]["name"]))
+    return scored[: q.limit]
+
+
+# ---------- Substitutions ----------
+@api_router.get("/substitutions")
+async def list_substitutions():
+    return await db.substitutions.find({}, {"_id": 0}).sort("ingredient", 1).to_list(500)
+
+
+@api_router.get("/substitutions/{ingredient}")
+async def get_substitutions(ingredient: str):
+    # Try exact match first (case-insensitive), then partial
+    doc = await db.substitutions.find_one(
+        {"ingredient": {"$regex": f"^{ingredient}$", "$options": "i"}}, {"_id": 0}
+    )
+    if not doc:
+        doc = await db.substitutions.find_one(
+            {"ingredient": {"$regex": ingredient, "$options": "i"}}, {"_id": 0}
+        )
+    if not doc:
+        raise HTTPException(
+            404,
+            "No substitutions on file for that one. Ask Sheldon in chat — he'll improvise."
+        )
+    return doc
 
 
 # ---------- Ingredients ----------
