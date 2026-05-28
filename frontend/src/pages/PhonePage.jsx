@@ -2,25 +2,61 @@ import React, { useEffect, useState } from "react";
 import { api, API } from "@/lib/api";
 import PageHeader from "@/components/PageHeader";
 import { Toaster, toast } from "sonner";
-import { Copy, Phone, ChatText, CheckCircle, Warning } from "@phosphor-icons/react";
+import { Copy, Phone, ChatText, CheckCircle, Warning, TelegramLogo, ArrowSquareOut } from "@phosphor-icons/react";
 
 export default function PhonePage() {
     const [status, setStatus] = useState(null);
     const [loading, setLoading] = useState(true);
+    const [tg, setTg] = useState(null);
+    const [tgLoading, setTgLoading] = useState(true);
+    const [setupBusy, setSetupBusy] = useState(false);
 
     useEffect(() => {
         api.get("/twilio/status")
             .then((r) => setStatus(r.data))
             .catch(() => setStatus(null))
             .finally(() => setLoading(false));
+        loadTelegram();
     }, []);
+
+    const loadTelegram = () => {
+        setTgLoading(true);
+        api.get("/telegram/status")
+            .then((r) => setTg(r.data))
+            .catch(() => setTg(null))
+            .finally(() => setTgLoading(false));
+    };
 
     const smsWebhook = `${API}/twilio/sms`;
     const voiceWebhook = `${API}/twilio/voice`;
+    const tgWebhook = `${API}/telegram/webhook`;
+    const publicBase = API.replace(/\/api$/, "");
 
     const copy = (text, label) => {
         navigator.clipboard.writeText(text);
         toast.success(`Copied ${label}`);
+    };
+
+    const runTelegramSetup = async () => {
+        setSetupBusy(true);
+        try {
+            const r = await api.post("/telegram/setup", { public_base_url: publicBase });
+            if (r.data.webhook_secret) {
+                toast.success("Webhook registered. Save the generated secret to .env!", { duration: 6000 });
+            } else {
+                toast.success("Webhook registered with Telegram");
+            }
+            loadTelegram();
+            // Show secret in a dialog-ish toast
+            if (r.data.webhook_secret) {
+                navigator.clipboard.writeText(r.data.webhook_secret);
+                toast.info(`Generated secret copied to clipboard. Add TELEGRAM_WEBHOOK_SECRET=${r.data.webhook_secret} to /app/backend/.env`, { duration: 12000 });
+            }
+        } catch (e) {
+            toast.error(e?.response?.data?.detail || "Setup failed");
+        } finally {
+            setSetupBusy(false);
+        }
     };
 
     const Step = ({ n, title, children }) => (
@@ -46,9 +82,9 @@ export default function PhonePage() {
         <div className="max-w-4xl mx-auto px-4 sm:px-6 py-8">
             <Toaster position="top-center" theme="dark" />
             <PageHeader
-                eyebrow="Telephony"
-                title="Russell on the line"
-                subtitle="Set up a real phone number you can text and call. One brain across web, SMS and phone."
+                eyebrow="Channels"
+                title="Russell beyond the web"
+                subtitle="Hook Russell up to SMS, phone calls, and Telegram. One brain across every channel."
             />
 
             {/* Status card */}
@@ -134,6 +170,120 @@ TWILIO_PHONE_NUMBER=+61400123456`}
                 </ul>
                 <p className="text-xs mt-3" style={{ color: "var(--text-muted)" }}>
                     Light personal use lands around A$3–5/month. Trial credit covers months of testing.
+                </p>
+            </div>
+
+            {/* ============================================================ */}
+            {/* TELEGRAM                                                     */}
+            {/* ============================================================ */}
+            <div className="mt-16 mb-8 flex items-center gap-3">
+                <TelegramLogo size={28} weight="fill" style={{ color: "var(--accent)" }} />
+                <h2 className="font-serif text-3xl" style={{ color: "var(--text-primary)" }}>
+                    Telegram — free, no card
+                </h2>
+            </div>
+            <p className="text-sm mb-6" style={{ color: "var(--text-secondary)" }}>
+                Spin up a personal Telegram bot for Russell. Free forever, no phone number, no Twilio bill. Texts him from your pocket like any other contact.
+            </p>
+
+            {/* Telegram status card */}
+            <div className="tool-card mb-8 flex items-center gap-4" data-testid="telegram-status-card">
+                {tgLoading ? (
+                    <span style={{ color: "var(--text-secondary)" }}>Checking…</span>
+                ) : tg?.configured && tg?.bot?.username ? (
+                    <>
+                        <CheckCircle size={28} weight="fill" style={{ color: "var(--accent)" }} />
+                        <div className="flex-1">
+                            <div className="font-serif text-xl" style={{ color: "var(--text-primary)" }}>
+                                Russell on Telegram: <span style={{ color: "var(--accent)" }}>@{tg.bot.username}</span>
+                            </div>
+                            <div className="text-sm" style={{ color: "var(--text-secondary)" }}>
+                                {tg?.webhook?.url
+                                    ? <>Webhook live · <span className="font-mono text-xs">{tg.webhook.url}</span></>
+                                    : "Bot token set. Click Register webhook below to go live."}
+                                {tg?.webhook?.last_error_message && (
+                                    <span style={{ color: "#FCA5A5" }}> · last error: {tg.webhook.last_error_message}</span>
+                                )}
+                            </div>
+                        </div>
+                        <a
+                            href={`https://t.me/${tg.bot.username}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="btn-ghost text-xs flex items-center gap-1"
+                            data-testid="telegram-open-chat"
+                        >
+                            Open chat <ArrowSquareOut size={12} />
+                        </a>
+                    </>
+                ) : (
+                    <>
+                        <Warning size={28} weight="fill" style={{ color: "#FCA5A5" }} />
+                        <div>
+                            <div className="font-serif text-xl" style={{ color: "var(--text-primary)" }}>
+                                Telegram bot not configured yet
+                            </div>
+                            <div className="text-sm" style={{ color: "var(--text-secondary)" }}>
+                                Three quick steps below. About 90 seconds.
+                            </div>
+                        </div>
+                    </>
+                )}
+            </div>
+
+            <Step n="1" title="Create the bot with @BotFather">
+                On Telegram, message <a href="https://t.me/BotFather" target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>@BotFather</a>. Send <code>/newbot</code>. Give it a display name (e.g. "Russell") and a username ending in <code>bot</code> (e.g. <code>russell_thebartender_bot</code>). BotFather hands you a <strong style={{ color: "var(--text-primary)" }}>bot token</strong> that looks like <code>123456:ABC-DEF...</code>. Copy it.
+            </Step>
+
+            <Step n="2" title="Drop the token in .env">
+                Paste your bot token into <code>/app/backend/.env</code> and restart the backend:
+                <pre className="mt-3 p-3 rounded-lg text-xs overflow-x-auto" style={{ background: "rgba(0,0,0,0.4)", border: "1px solid var(--border-subtle)", color: "var(--text-primary)" }}>
+{`TELEGRAM_BOT_TOKEN=123456:ABC-DEF_paste-your-bot-token-here`}
+                </pre>
+                Or just share it here in chat — I'll wire it in for you.
+            </Step>
+
+            <Step n="3" title="Register the webhook">
+                Once the token is set, click the button. I'll tell Telegram where to send messages and generate a secret to verify them.
+                <div className="mt-4">
+                    <button
+                        onClick={runTelegramSetup}
+                        disabled={setupBusy || !tg?.configured}
+                        className="btn-primary text-sm"
+                        data-testid="telegram-register-webhook"
+                    >
+                        {setupBusy ? "Registering…" : tg?.webhook?.url ? "Re-register webhook" : "Register webhook with Telegram"}
+                    </button>
+                    <span className="ml-3 text-xs" style={{ color: "var(--text-muted)" }}>
+                        Webhook URL: <span className="font-mono">{tgWebhook}</span>
+                        <button
+                            onClick={() => copy(tgWebhook, "Telegram webhook URL")}
+                            className="ml-2 underline"
+                            data-testid="copy-telegram-webhook"
+                        >
+                            copy
+                        </button>
+                    </span>
+                </div>
+            </Step>
+
+            <div className="tool-card mt-4">
+                <div className="label-tiny mb-2">Lock it to just you (recommended)</div>
+                <p className="text-sm mb-2" style={{ color: "var(--text-secondary)" }}>
+                    Anyone who finds your bot's username can message it. To keep Russell private, message your bot, then send <code>/whoami</code> — he'll reply with your chat ID. Add it to <code>.env</code>:
+                </p>
+                <pre className="p-3 rounded-lg text-xs overflow-x-auto" style={{ background: "rgba(0,0,0,0.4)", border: "1px solid var(--border-subtle)", color: "var(--text-primary)" }}>
+{`TELEGRAM_ALLOWED_CHAT_IDS=123456789`}
+                </pre>
+                <p className="text-xs mt-2" style={{ color: "var(--text-muted)" }}>
+                    Comma-separated for multiple. Leave blank to let anyone chat.
+                </p>
+            </div>
+
+            <div className="tool-card mt-4">
+                <div className="label-tiny mb-2">Costs</div>
+                <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
+                    Free. No card. No phone number. Telegram doesn't charge for bot messages — your only cost is the LLM tokens (same as web chat).
                 </p>
             </div>
         </div>

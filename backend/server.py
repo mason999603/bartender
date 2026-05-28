@@ -29,6 +29,7 @@ from routers import (  # noqa: E402
     memory,
     regulars,
     substitutions,
+    telegram_routes,
     tools,
     twilio_routes,
     voice,
@@ -138,6 +139,7 @@ for r in (
     memory.router,
     inventory.router,
     collections.router,
+    telegram_routes.router,
 ):
     api_router.include_router(r)
 

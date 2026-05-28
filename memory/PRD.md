@@ -85,6 +85,19 @@ User started asking "can you give me your source code so I can build an offline 
 - **Chat persistence fix carried over**: messages persisted atomically AFTER successful LLM call — no orphan user msgs on errors.
 - Tested (iteration_6): backend 26/26 (100%). Verified pairing fires for "spun up Rastaman Vibrations" (reggae match) and stays quiet for non-music input or records not in the collection (no fabrication).
 
+### Phase 6.5 (2026-02) — Telegram Bot integration
+- **Channel #4**: Russell is now reachable via Telegram in addition to Web, SMS, and Voice. Free forever, no card, no phone number.
+- New `/app/backend/routers/telegram_routes.py`:
+  - `POST /api/telegram/webhook` — receives updates from Telegram, verifies `X-Telegram-Bot-Api-Secret-Token` header, routes text → `chat_with_russell(channel="telegram")` → `sendMessage`.
+  - `GET /api/telegram/status` — live bot info + webhook status (no secrets exposed).
+  - `POST /api/telegram/setup` — registers the webhook with Telegram (auto-generates a secret if missing) using the public app URL.
+  - `POST /api/telegram/teardown` — unregisters the webhook.
+  - Commands handled: `/start`, `/help`, `/whoami` (returns chat_id for lockdown).
+  - Optional allowlist via `TELEGRAM_ALLOWED_CHAT_IDS` env var so the bot can be locked to specific personal chats.
+- **Brain channel**: new `channel="telegram"` instructs Russell to output plain text (no markdown asterisks/headers) — Telegram's MarkdownV2 escaping is painful, plain text is reliable.
+- **Frontend**: Phone page renamed to "Channels", new Telegram card + 3-step setup wizard (Create with BotFather → Drop token in .env → Register webhook button). One-click register copies the auto-generated webhook secret to clipboard.
+- Verified end-to-end via in-process ASGI test: `/start` → friendly intro; "Negroni spec" → Russell returns clean plain-text spec; bad secret → 403; `/whoami` → echoes chat_id.
+
 ## Prioritized Backlog
 ### P0 (Phase 5 — Raspberry Pi)
 - [ ] Pi client: wake word (Porcupine "Hey Sheldon") → record → hit cloud Brain API → audio playback

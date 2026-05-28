@@ -233,6 +233,12 @@ async def chat_with_russell(session_id: str, user_text: str, channel: str = "web
             "Keep replies under 35 words. No markdown, no lists, no bullet points, no headers. "
             "Pure natural speech. Don't read out ml measurements as numbers — say 'fifteen mls' style."
         )
+    elif channel == "telegram":
+        system_prompt += (
+            "\n\nCHANNEL: TELEGRAM — Plain text only. No markdown (no **bold**, no *italics*, no headers, no bullet lists). "
+            "Keep it tight and conversational like SMS but you can run a bit longer if you've got a spec to give. "
+            "When you give a cocktail spec, use simple line breaks and dash-bullets like '- 60ml gin' — no asterisks."
+        )
 
     # Recent history (last 20 messages) for transcript context — fetched BEFORE we persist
     # the new user turn so the model doesn't see a duplicate "Current message" line.

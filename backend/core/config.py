@@ -14,4 +14,13 @@ TWILIO_PHONE_NUMBER = os.environ.get("TWILIO_PHONE_NUMBER", "")
 TWILIO_VALIDATE_SIGNATURE = os.environ.get("TWILIO_VALIDATE_SIGNATURE", "true").lower() == "true"
 PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "")
 
+# Telegram
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+TELEGRAM_WEBHOOK_SECRET = os.environ.get("TELEGRAM_WEBHOOK_SECRET", "").strip()
+# Comma-separated chat IDs. Empty = allow all (use only for personal bots).
+_raw_allowed = os.environ.get("TELEGRAM_ALLOWED_CHAT_IDS", "").strip()
+TELEGRAM_ALLOWED_CHAT_IDS: set[int] = {
+    int(x) for x in _raw_allowed.split(",") if x.strip().lstrip("-").isdigit()
+}
+
 CORS_ORIGINS = os.environ.get("CORS_ORIGINS", "*").split(",")
