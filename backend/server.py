@@ -20,6 +20,7 @@ from emergentintegrations.llm.chat import LlmChat, UserMessage
 from emergentintegrations.llm.openai import OpenAISpeechToText
 
 from seed_data import INGREDIENTS, COCKTAILS, CLASH_RULES, SUBSTITUTIONS
+from companion import build_companion_context, fetch_weather, get_user_location_and_tz
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -167,6 +168,39 @@ class InventoryCreate(BaseModel):
     notes: str = ""
 
 
+class CollectionItem(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    title: str  # e.g., "Pink Floyd — Dark Side of the Moon"
+    subtitle: str = ""  # year / artist / author / etc.
+    tags: List[str] = []  # genre, mood, condition, etc.
+    notes: str = ""
+    rating: Optional[int] = None  # 1-5 personal rating, optional
+    created_at: str = Field(default_factory=now_iso)
+
+
+class Collection(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    name: str  # e.g., "Records", "Books", "Movies to Watch"
+    icon: str = "stack"  # phosphor icon name, see frontend
+    description: str = ""
+    items: List[CollectionItem] = []
+    created_at: str = Field(default_factory=now_iso)
+
+
+class CollectionCreate(BaseModel):
+    name: str
+    icon: str = "stack"
+    description: str = ""
+
+
+class CollectionItemCreate(BaseModel):
+    title: str
+    subtitle: str = ""
+    tags: List[str] = []
+    notes: str = ""
+    rating: Optional[int] = None
+
+
 # ============================================================
 # Seeding (upsert-by-name so new data lands cleanly across restarts)
 # ============================================================
@@ -254,13 +288,14 @@ async def get_clash_warnings(ingredient_names: List[str]) -> List[dict]:
     return warnings
 
 async def build_russell_system_prompt() -> str:
-    # Pull live context: memories, regulars, inventory, custom cocktails, subs
+    # Pull live context: memories, regulars, inventory, custom cocktails, subs, collections
     memories = await db.memories.find({}, {"_id": 0}).sort("created_at", -1).limit(30).to_list(30)
     regulars = await db.regulars.find({}, {"_id": 0}).limit(30).to_list(30)
     inventory_in = [i["name"] for i in await db.inventory.find({"in_stock": True}, {"_id": 0}).to_list(200)]
     inventory_out = [i["name"] for i in await db.inventory.find({"in_stock": False}, {"_id": 0}).to_list(200)]
     custom = await db.cocktails.find({"is_custom": True}, {"_id": 0}).limit(30).to_list(30)
     subs = await db.substitutions.find({}, {"_id": 0}).to_list(500)
+    collections = await db.collections.find({}, {"_id": 0}).limit(20).to_list(20)
 
     mem_block = "\n".join([f"  - {m['key']}: {m['value']}" for m in memories]) or "  (no saved memories yet)"
     reg_block = "\n".join([f"  - {r['name']}: likes={r.get('likes', [])}, dislikes={r.get('dislikes', [])}, favs={r.get('favourite_cocktails', [])}, notes={r.get('notes', '')}" for r in regulars]) or "  (no regulars saved yet)"
@@ -271,25 +306,49 @@ async def build_russell_system_prompt() -> str:
         [f"  - {s['ingredient']} → " + "; ".join(f"{x['name']} ({x.get('notes','')})" for x in s.get("subs", [])) for s in subs]
     ) or "  (none on file)"
 
-    return f"""You are RUSSELL — a witty, dry, down-to-earth young Australian bartender. An up-and-comer with serious chops. You speak with subtle Aussie warmth (occasional "mate", "reckon", "no worries", "fair dinkum") but you DON'T overdo it or sound like a parody. Confident, never arrogant. Quick with a one-liner. Genuinely helpful.
+    # Collections — render each collection compactly
+    if collections:
+        col_lines = []
+        for c in collections:
+            items = c.get("items", []) or []
+            item_summary = ", ".join(
+                f"{i['title']}" + (f" ({i['subtitle']})" if i.get("subtitle") else "")
+                for i in items[:15]
+            )
+            if len(items) > 15:
+                item_summary += f", …and {len(items) - 15} more"
+            col_lines.append(f"  - {c['name']} ({len(items)} items): {item_summary or '(empty)'}")
+        col_block = "\n".join(col_lines)
+    else:
+        col_block = "  (no personal collections saved yet)"
 
-You serve one user: a working bartender/mixologist. Treat them like a peer behind the stick, not a beginner.
+    return f"""You are RUSSELL — a witty, dry, down-to-earth young Australian. Real bloke energy: confident without being arrogant, quick with a one-liner, never robotic. You speak with subtle Aussie warmth (occasional "mate", "reckon", "no worries", "fair dinkum") but you DON'T overdo it or sound like a parody.
 
-YOUR KNOWLEDGE:
-- Encyclopedic on spirits, liqueurs, modifiers, bitters, mixers, syrups — flavour profiles, ABVs, production methods, regional variations.
-- Cocktail chemistry: emulsion, dilution, acidity, sugar, bitterness balance. You know what clashes and why (dairy curdles with citrus/quinine/wine; absinthe louches at high water content; cream + Campari is rare for good reason).
+You're a MATE FIRST, BARTENDER SECOND. The user is your friend (a working bartender/mixologist) — talk to him like one. You can help with anything a smart mate would: the weather, what time it is, life advice, random questions, news, music, jokes, what to cook, what to watch, life stuff, philosophy, banter — *anything*. You happen to also be an expert bartender, but you're not just a cocktail vending machine.
+
+REAL-TIME AWARENESS:
+You DO have access to the current local time, date, and live weather (provided to you each turn in the REAL-TIME CONTEXT section below). Use it naturally:
+- If user says "good morning" / "g'day" — greet them back warmly, mention the weather if it's interesting, suggest something time-appropriate.
+- If asked "what time is it" / "what day is it" / "is it still morning" — answer directly from the context.
+- If asked about the weather, the forecast, "is it gonna rain", etc. — answer with the live data, not a guess.
+- Comment on weather naturally when relevant ("ripper day for an Aperol Spritz outside" / "wet one tonight — perfect Hot Toddy weather").
+
+YOUR DEEP KNOWLEDGE (when the topic comes up):
+- Encyclopedic on spirits, liqueurs, modifiers, bitters, mixers, syrups — flavour profiles, ABVs, production, regional variations.
+- Cocktail chemistry: emulsion, dilution, acidity, sugar, bitterness balance. You know what clashes and why.
 - Classics (IBA list), modern classics, tiki, low-ABV, zero-proof builds.
-- Technique: shake hard vs gentle, dry shake order, stir vs shake choice, ice formats, glassware, garnish, dilution targets.
+- Technique: shake hard vs gentle, dry shake order, stir vs shake, ice formats, glassware, garnish.
 - Service: batching, pre-dilution, oleo saccharum, fat-washing, clarification, infusions.
 
 BEHAVIOUR RULES:
-- If the user describes a build with a fatal chemistry clash, tell them straight (with the reason) and offer the fix.
-- When suggesting cocktails, give a proper SPEC (with ml measurements) and method when relevant.
-- When the user asks "what can I make" — check the inventory below (and assume the rest of a normal bar is available unless they say otherwise).
-- **If a recipe you're suggesting needs something 86'd (see "Currently 86'd" below), PROACTIVELY swap it using the Substitutions cheat-sheet** and tell the user what you swapped and why. Don't make them ask.
-- If a question is outside cocktails/spirits/service, answer briefly and humanly — you're a mate, not a chatbot.
-- If you genuinely don't know, say so.
-- KEEP REPLIES TIGHT. Bartender-style: clear, fast, useful.
+- KEEP REPLIES TIGHT. Conversational, real-mate length. Not essay-mode unless the user clearly wants depth.
+- When the user describes a build with a fatal chemistry clash (e.g., dairy + citrus), tell them straight (with the reason) and offer the fix.
+- When suggesting cocktails, give a proper SPEC (with ml measurements) and method.
+- When the user asks "what can I make" — check the inventory below.
+- If a recipe you're suggesting needs something 86'd, PROACTIVELY swap it using the Substitutions cheat-sheet — don't make them ask.
+- Outside cocktails/spirits — just be a smart, funny mate. Answer briefly, share an opinion if you've got one, riff if it's fun.
+- If you genuinely don't know something, say so. No making things up.
+- Pure conversation — no markdown headers, no bullet lists unless really helpful, no asterisks for emphasis.
 
 CURRENT CONTEXT THE USER HAS SAVED:
 
@@ -308,10 +367,13 @@ CURRENT CONTEXT THE USER HAS SAVED:
 [User's custom cocktail specs]
 {custom_block}
 
-[Substitution cheat-sheet — use these when an ingredient is 86'd or the user asks for swaps]
+[Substitution cheat-sheet — use when an ingredient is 86'd or user asks for swaps]
 {subs_block}
 
-Reference these naturally when relevant. Don't recite them verbatim — use them like a real bartender remembering their bar.
+[The user's personal collections — they trust you to remember these]
+{col_block}
+
+Reference these naturally when relevant. Don't recite them verbatim — use them like a real mate remembering what's going on.
 """
 
 
@@ -368,6 +430,26 @@ async def voice_transcribe(audio: UploadFile = File(...)):
 
     text = getattr(response, "text", None) or ""
     return {"text": text.strip()}
+
+
+# ---------- Companion (weather, time, location) ----------
+@api_router.get("/companion/weather")
+async def companion_weather(location: Optional[str] = None):
+    """Return live weather. If no location given, uses the user's saved location."""
+    if location is None:
+        location, _ = await get_user_location_and_tz(db)
+    w = await fetch_weather(location)
+    if not w:
+        raise HTTPException(404, f"Couldn't find weather for {location!r}")
+    return w
+
+
+@api_router.get("/companion/context")
+async def companion_context():
+    """Preview the real-time grounding block Russell receives. For debugging / UI 'today' card."""
+    location, tz_name = await get_user_location_and_tz(db)
+    block = await build_companion_context(db, "good morning")  # trigger weather too
+    return {"location": location, "timezone": tz_name, "context_block": block}
 
 
 # ---------- Twilio (SMS + Voice) ----------
@@ -545,8 +627,13 @@ async def chat_with_russell(session_id: str, user_text: str, channel: str = "web
     user_msg = StoredMessage(session_id=session_id, role="user", content=user_text)
     await db.chat_messages.insert_one(user_msg.model_dump())
 
-    # Build system prompt with live context + per-channel addendum
+    # Build system prompt with live context + per-channel addendum + real-time companion grounding
     system_prompt = await build_russell_system_prompt()
+
+    companion_block = await build_companion_context(db, user_text)
+    if companion_block:
+        system_prompt += f"\n\n## REAL-TIME CONTEXT (use naturally, don't recite verbatim)\n{companion_block}"
+
     if channel == "sms":
         system_prompt += (
             "\n\nCHANNEL: SMS — Keep your reply under 320 characters (2 SMS segments). "
@@ -916,6 +1003,58 @@ async def delete_inventory(item_id: str):
     result = await db.inventory.delete_one({"id": item_id})
     if result.deleted_count == 0:
         raise HTTPException(404, "Not found")
+    return {"deleted": True}
+
+
+# ---------- Collections (records, books, movies — anything Russell should remember) ----------
+@api_router.get("/collections")
+async def list_collections():
+    return await db.collections.find({}, {"_id": 0}).sort("created_at", -1).to_list(200)
+
+
+@api_router.post("/collections", response_model=Collection)
+async def create_collection(c: CollectionCreate):
+    col = Collection(**c.model_dump())
+    await db.collections.insert_one(col.model_dump())
+    return col
+
+
+@api_router.get("/collections/{collection_id}")
+async def get_collection(collection_id: str):
+    doc = await db.collections.find_one({"id": collection_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Collection not found")
+    return doc
+
+
+@api_router.delete("/collections/{collection_id}")
+async def delete_collection(collection_id: str):
+    result = await db.collections.delete_one({"id": collection_id})
+    if result.deleted_count == 0:
+        raise HTTPException(404, "Not found")
+    return {"deleted": True}
+
+
+@api_router.post("/collections/{collection_id}/items", response_model=CollectionItem)
+async def add_collection_item(collection_id: str, item: CollectionItemCreate):
+    new_item = CollectionItem(**item.model_dump())
+    result = await db.collections.update_one(
+        {"id": collection_id},
+        {"$push": {"items": new_item.model_dump()}},
+    )
+    if result.matched_count == 0:
+        raise HTTPException(404, "Collection not found")
+    return new_item
+
+
+@api_router.delete("/collections/{collection_id}/items/{item_id}")
+async def delete_collection_item(collection_id: str, item_id: str):
+    result = await db.collections.update_one(
+        {"id": collection_id},
+        {"$pull": {"items": {"id": item_id}}},
+    )
+    if result.modified_count == 0:
+        raise HTTPException(404, "Item not found")
     return {"deleted": True}
 
 

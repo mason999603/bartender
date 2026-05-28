@@ -1,6 +1,6 @@
 import React from "react";
 import { NavLink } from "react-router-dom";
-import { ChatCircleDots, BookOpen, Wrench, Users, Brain, Package, Phone } from "@phosphor-icons/react";
+import { ChatCircleDots, BookOpen, Wrench, Users, Brain, Package, Phone, Stack } from "@phosphor-icons/react";
 
 const NAV = [
     { to: "/", label: "Chat", icon: ChatCircleDots, end: true, testid: "nav-chat" },
@@ -8,6 +8,7 @@ const NAV = [
     { to: "/tools", label: "Tools", icon: Wrench, testid: "nav-tools" },
     { to: "/inventory", label: "Bar", icon: Package, testid: "nav-inventory" },
     { to: "/regulars", label: "Regulars", icon: Users, testid: "nav-regulars" },
+    { to: "/collections", label: "Crates", icon: Stack, testid: "nav-collections" },
     { to: "/memory", label: "Memory", icon: Brain, testid: "nav-memory" },
     { to: "/phone", label: "Phone", icon: Phone, testid: "nav-phone" },
 ];
