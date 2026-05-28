@@ -1,0 +1,41 @@
+{
+  "summary": "First iteration of Sheldon — AI bartender. Backend pytest suite (19 tests): 17 PASSED, 2 FAILED due to Emergent LLM budget cap (Max budget: 0.001 per call exceeded — NOT a code bug). LLM integration verified working via 'test_chat_warns_baileys_lime' which correctly received Claude Sonnet 4.5 reply mentioning curdling. Frontend tested end-to-end with Playwright: all 6 nav routes, chat send, library + search + detail modal + custom spec create, all 5 tool tabs (Make/Clash/ABV/Batch/Cost), Inventory add, Regulars add, Memory add — ALL WORKING.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/chat", "issue": "Emergent LLM key budget cap exceeded intermittently (litellm.BadRequestError: 'Budget has been exceeded! Current cost: 0.005214, Max budget: 0.001'). Causes ~30-50% of consecutive chat calls to return 500. The integration itself works — one successful call confirmed Claude Sonnet 4.5 replies in-character with curdle chemistry warning. This is an Emergent universal-key budget configuration, not a code issue. Recommend either bumping the per-call budget for this key or adding a friendlier 'over budget' error message in /api/chat."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_sheldon_api.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Investigate Emergent LLM key budget cap — Max budget appears to be 0.001 which is well below a single Claude Sonnet 4.5 call cost (~0.005). Either raise per-call budget or implement graceful UX when budget hits.",
+    "Consider catching the specific budget-exceeded error in /api/chat and returning a user-friendly 503/429 with message like 'Sheldon's tab is closed for the day, mate' instead of generic 500."
+  ],
+  "critical_code_review_comments": [
+    "server.py is 600 lines — still manageable, but as Phase 2 (voice/telephony) lands, consider splitting into routers/ (chat.py, cocktails.py, tools.py, crud.py).",
+    "build_sheldon_system_prompt() runs 4 DB queries on every chat call — fine for single user, but cache or move to a single aggregation if multi-user.",
+    "DELETE /api/chat/history and other delete endpoints return success even if nothing was deleted — acceptable for idempotency.",
+    "tools/cost: line_items missing 'price_per_litre' echo — minor, frontend already has it.",
+    "All MongoDB queries correctly exclude _id via projection ({'_id': 0}) — good.",
+    "EMERGENT_LLM_KEY is checked at call-time, not startup — good for hot-reloading config.",
+    "Frontend testid coverage is excellent across all pages."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_sheldon_api.py (new)"
+  ],
+  "success_rate": {"backend": "89% (17/19, 2 failures are LLM budget infra issue, not code)", "frontend": "100% (all flows tested pass)"},
+  "test_credentials": "N/A — single-user app, no auth.",
+  "seed_data_creation": "Backend auto-seeds 22 cocktails + 65 ingredients + 14 clash rules on startup if collections empty. Verified seeding works.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend is solid. Only friction is Emergent LLM key budget cap — if you hit a 500 with 'Budget has been exceeded', it's the key not the code. The test 'test_chat_warns_baileys_lime' is the canonical 'did the LLM actually answer' check. Frontend uses testids like 'clash-ing-input' (NOT 'clash-input') — IngredientList shared component uses prefix + '-input'/'-add'. All seed data + cocktail library + tools + CRUD pages fully functional.",
+  "rca of the issue": "Two chat tests returned HTTP 500 with body: 'LLM error: Failed to generate chat completion: litellm.BadRequestError: OpenAIException - Budget has been exceeded! Current cost: 0.005214, Max budget: 0.001'. This is litellm rejecting the call because the configured per-request budget (0.001 USD) is lower than the actual cost of a Claude Sonnet 4.5 request (~0.005 USD). Root cause: budget configuration on the EMERGENT_LLM_KEY, not in /app/backend/server.py. Mitigation: bump key budget OR (in code) catch this specific exception and degrade gracefully with a 429/503 + friendly message. Note that intermittent passes (test_chat_warns_baileys_lime succeeded with a proper Aussie reply mentioning chemistry) indicate the budget likely resets per-window or there is a separate allowance — but consecutive calls reliably trip it."
+}
