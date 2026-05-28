@@ -1,0 +1,91 @@
+{
+  "theme": "dark",
+  "archetype": "5 (Luxury / Speakeasy)",
+  "vibe": "Atmospheric, dark wood, amber liquid, dim lighting, tactile surfaces, premium yet functional.",
+  "colors": {
+    "background_base": "#0A0A0C",
+    "background_surface": "#121216",
+    "background_glass": "bg-black/60 backdrop-blur-xl border border-white/10",
+    "primary_accent": "#E09132",
+    "primary_accent_hover": "#F5A623",
+    "text_primary": "#F3F4F6",
+    "text_secondary": "#9CA3AF",
+    "text_muted": "#4B5563",
+    "warning_danger": "#991B1B",
+    "success": "#166534"
+  },
+  "typography": {
+    "font_heading": "Cormorant Garamond",
+    "font_body": "Manrope",
+    "heading_classes": "font-serif tracking-tight text-primary-accent",
+    "body_classes": "font-sans leading-relaxed text-text-primary",
+    "h1": "text-4xl sm:text-5xl lg:text-6xl font-light",
+    "h2": "text-2xl sm:text-3xl lg:text-4xl font-normal",
+    "h3": "text-xl sm:text-2xl font-medium",
+    "h4": "text-lg sm:text-xl font-medium",
+    "small_labels": "text-xs tracking-[0.2em] uppercase text-text-secondary"
+  },
+  "spacing_and_layout": {
+    "padding_generous": "p-6 md:p-8",
+    "gap_standard": "gap-6 md:gap-8",
+    "border_radius": "rounded-xl",
+    "layout_pattern": "bento_grid_tetris_mode",
+    "nav_pattern": "bottom_navigation_for_mobile, side_panel_for_desktop",
+    "alignment": "left_aligned_text, optical_alignment_for_icons"
+  },
+  "surfaces": {
+    "chat_bubble_sheldon": "bg-background-surface border border-white/5 rounded-2xl rounded-tl-sm p-4 shadow-sm",
+    "chat_bubble_user": "bg-primary-accent/10 border border-primary-accent/20 rounded-2xl rounded-tr-sm p-4 text-white",
+    "tool_card": "bg-black/40 backdrop-blur-md border border-white/10 rounded-xl p-6 shadow-[0_8px_32px_rgba(0,0,0,0.4)]",
+    "header_glass": "bg-black/80 backdrop-blur-2xl border-b border-white/10"
+  },
+  "components": {
+    "buttons": "bg-primary-accent text-[#0A0A0C] hover:bg-primary-accent-hover font-medium px-6 py-3 rounded-lg transition-colors",
+    "inputs": "bg-[#121216] border border-white/10 focus:border-primary-accent focus:ring-1 focus:ring-primary-accent text-white rounded-lg px-4 py-3",
+    "badges": "bg-white/5 border border-white/10 text-xs tracking-wider uppercase px-2 py-1 rounded"
+  },
+  "motion": {
+    "transitions": "transition-all duration-300 ease-out",
+    "hover_effects": "hover:-translate-y-1 hover:shadow-[0_8px_24px_rgba(224,145,50,0.15)]",
+    "page_load": "framer-motion fade-in and slide-up"
+  },
+  "icons_library": "@phosphor-icons/react",
+  "media": {
+    "speakeasy_bg": {
+      "url": "https://static.prod-images.emergentagent.com/jobs/795e15e4-5c4e-473e-8d52-d15a81982662/images/1c1a31a84c50d6da7294e41a9e26f29ddde9afb8e36d31fb24f0c93378dfcde7.png",
+      "description": "Abstract dark moody speakeasy background texture, deep warm charcoal, subtle amber light bleed",
+      "usage": "Main application background or hero section overlay"
+    },
+    "sheldon_avatar": {
+      "url": "https://static.prod-images.emergentagent.com/jobs/795e15e4-5c4e-473e-8d52-d15a81982662/images/2924431caf4b1cb941d527f2b1be1829f89f939a1e4daef41557ea98b1d66ef3.png",
+      "description": "AI avatar of a witty young Australian bartender named Sheldon",
+      "usage": "Chat interface avatar for the AI"
+    },
+    "bar_tools_ambient": {
+      "url": "https://static.prod-images.emergentagent.com/jobs/795e15e4-5c4e-473e-8d52-d15a81982662/images/6050d0bb73866f46119dfabcc6c87ac0d2c53469b4baf890b45c3acdb674eb0f.png",
+      "description": "Close up of whiskey glass and bar tools, dark dramatic lighting",
+      "usage": "Dashboard empty state or tool section headers"
+    },
+    "cocktail_1": {
+      "url": "https://images.unsplash.com/photo-1500217052183-bc01eee1a74e?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2NzR8MHwxfHNlYXJjaHwxfHxjb2NrdGFpbCUyMGRhcmslMjBtb29keXxlbnwwfHx8fDE3Nzk5OTE3NDF8MA&ixlib=rb-4.1.0&q=85",
+      "description": "Old fashioned style cocktail on bar counter",
+      "usage": "Featured recipe card"
+    },
+    "cocktail_2": {
+      "url": "https://images.unsplash.com/photo-1621873495884-845a939892d1?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2NzR8MHwxfHNlYXJjaHwyfHxjb2NrdGFpbCUyMGRhcmslMjBtb29keXxlbnwwfHx8fDE3Nzk5OTE3NDF8MA&ixlib=rb-4.1.0&q=85",
+      "description": "Moody clear drink on wooden table",
+      "usage": "Featured recipe card"
+    }
+  },
+  "instructions_to_main_agent": [
+    "Install and use @phosphor-icons/react for icons.",
+    "Install framer-motion for smooth transitions and chat bubble pop-ins.",
+    "Implement a bottom navigation bar for mobile views, and a side panel or expanded top nav for desktop.",
+    "Use glassmorphism with dark translucent backgrounds for the chat and tool panels over the speakeasy background.",
+    "All interactive elements MUST have a data-testid attribute in kebab-case based on their role.",
+    "For the tools section (ABV, batching, clashes), use Shadcn UI components but heavily customized to match the dark luxury theme (no pure white, use text-primary and background-surface).",
+    "Headings must use Cormorant Garamond, body text must use Manrope.",
+    "The primary action buttons should be the warm Amber accent (#E09132) to evoke whiskey/warm lighting.",
+    "Do not use generic blue/purple AI gradients. Stick to the dark charcoal and amber palette."
+  ]
+}
