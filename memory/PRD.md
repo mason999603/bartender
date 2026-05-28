@@ -42,18 +42,15 @@ User started asking "can you give me your source code so I can build an offline 
 - Tested (iteration_2): backend 29/29 (100%), frontend 100%.
 
 ## Prioritized Backlog
-### P0 (Phase 3 — Voice on Web)
-- [ ] OpenAI Whisper STT for push-to-talk in browser
-- [ ] OpenAI TTS or ElevenLabs for Sheldon's voice reply
-- [ ] Web Audio activity indicators
-
-### P1 (Phase 4 — Telephony)
+### P0 (Phase 4 — Telephony)
 - [ ] Twilio number → SMS chat with Sheldon
 - [ ] Twilio Voice → realtime call (Media Streams + STT + TTS)
+- [ ] Reuse `/api/voice/transcribe` and the chat brain
 
-### P2 (Phase 5 — Raspberry Pi)
+### P1 (Phase 5 — Raspberry Pi)
 - [ ] Export to GitHub
-- [ ] Pi client: wake word (Porcupine "Hey Sheldon") → record → hit cloud Brain API → TTS playback
+- [ ] Pi client: wake word (Porcupine "Hey Sheldon") → record → hit cloud Brain API → audio playback
+- [ ] systemd service, NVMe boot, USB mic array
 - [ ] Optional: fully local mode via Ollama + Llama 3 for offline ops
 
 ## Known Constraints
@@ -66,3 +63,4 @@ User started asking "can you give me your source code so I can build an offline 
 - `/app/frontend/src/pages/*` — Chat, Cocktails, Tools, Inventory, Regulars, Memory
 - `/app/frontend/src/components/Topbar.jsx`, `PageHeader.jsx`
 - `/app/frontend/src/lib/api.js`
+ib/api.js`

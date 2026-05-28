@@ -378,7 +378,7 @@ export default function VoiceControls({ onTranscript, sheldonLastReply, onListen
             {showSettings && (
                 <div
                     className="absolute glass-strong rounded-xl p-5 z-40"
-                    style={{ bottom: 80, right: 12, width: 320, maxWidth: "calc(100vw - 24px)" }}
+                    style={{ bottom: 70, left: 12, width: 320, maxWidth: "calc(100vw - 24px)" }}
                     data-testid="voice-settings-panel"
                 >
                     <div className="flex items-center justify-between mb-4">
