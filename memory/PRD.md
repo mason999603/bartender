@@ -62,6 +62,19 @@ User started asking "can you give me your source code so I can build an offline 
 - X-Twilio-Signature validation gated on TWILIO_AUTH_TOKEN being set (auto-skipped during dev setup).
 - Tested (iteration_4): 12/12 backend, all frontend checks — 100%.
 
+### Phase 4.5 (2026-01) — Companion + Rename + Collections
+- **Rename Sheldon → Russell** across all 12 source files (system prompts, UI strings, voice greetings, TwiML messages, localStorage keys). DB migration rewrites both `role` field AND inline mentions of "Sheldon" in chat_messages.content for clean history.
+- **Companion grounding (`/app/backend/companion.py`)**: every chat turn now silently includes a real-time context block: current local time + day + time-of-day phase (morning/midday/etc.) + user's location + live weather (when relevant).
+- **Free weather**: Open-Meteo (primary) + **wttr.in fallback** (no API key, free, no quota fights). 10-minute in-memory cache to be polite to the providers.
+- **Persona upgrade**: Russell is now "mate first, bartender second" — he engages with random non-cocktail questions naturally (existentialism, weather, life advice, music recs).
+- **New `/api/companion/weather` and `/api/companion/context` endpoints** for direct UI access and debugging.
+- **Collections feature**: Russell can now remember the user's record collection, books, movies, playlists, or any list-style data.
+  - Models: `Collection` with `items` array (title, subtitle, tags, notes, 1-5 star rating).
+  - CRUD: `/api/collections`, `/api/collections/{id}/items`.
+  - Collections are injected into Russell's system prompt — verified that asking "what should I play tonight" surfaces titles by name from the saved Records collection with personal commentary ("Side three into four is an absolute journey…").
+  - New `/collections` page (nav label: **Crates**) with preset starters (Records/Books/Movies/Playlists), custom icon picker, item detail modal with star ratings.
+- Tested (iteration_5): backend 21/21, frontend full coverage — 100%. One data-hygiene issue (legacy "Sheldon" in historical message content) was caught and patched same iteration via the extended migration.
+
 ## Prioritized Backlog
 ### P0 (Phase 5 — Raspberry Pi)
 - [ ] Pi client: wake word (Porcupine "Hey Sheldon") → record → hit cloud Brain API → audio playback

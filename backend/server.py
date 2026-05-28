@@ -258,6 +258,24 @@ async def seed_db():
     if rename_result.modified_count:
         logger.info(f"Migrated {rename_result.modified_count} chat messages: role sheldon → russell")
 
+    # Content migration: rewrite "Sheldon" → "Russell" inside historical message bodies (any role).
+    content_result = await db.chat_messages.update_many(
+        {"content": {"$regex": "[Ss]heldon"}},
+        [{
+            "$set": {
+                "content": {
+                    "$replaceAll": {
+                        "input": {"$replaceAll": {"input": "$content", "find": "Sheldon", "replacement": "Russell"}},
+                        "find": "sheldon",
+                        "replacement": "russell",
+                    }
+                }
+            }
+        }],
+    )
+    if content_result.modified_count:
+        logger.info(f"Rewrote 'Sheldon' → 'Russell' in {content_result.modified_count} historical messages")
+
 
 @app.on_event("shutdown")
 async def shutdown_db():
