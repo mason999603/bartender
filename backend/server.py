@@ -3,7 +3,7 @@
 Phase 1: Web chat + cocktail brain + tools.
 Future: voice (Whisper/TTS), telephony (Twilio), Raspberry Pi deploy.
 """
-from fastapi import FastAPI, APIRouter, HTTPException, UploadFile, File
+from fastapi import FastAPI, APIRouter, HTTPException, UploadFile, File, Request, Response
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -363,30 +363,205 @@ async def voice_transcribe(audio: UploadFile = File(...)):
     return {"text": text.strip()}
 
 
+# ---------- Twilio (SMS + Voice) ----------
+TWILIO_ACCOUNT_SID = os.environ.get("TWILIO_ACCOUNT_SID", "")
+TWILIO_AUTH_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN", "")
+TWILIO_PHONE_NUMBER = os.environ.get("TWILIO_PHONE_NUMBER", "")
+TWILIO_VALIDATE_SIGNATURE = os.environ.get("TWILIO_VALIDATE_SIGNATURE", "true").lower() == "true"
+PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "")  # e.g., https://yourapp.preview.emergentagent.com
+
+
+def _xml_escape(s: str) -> str:
+    return (
+        (s or "")
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+        .replace("'", "&apos;")
+    )
+
+
+def _reconstruct_public_url(request: Request) -> str:
+    """Twilio signs the public URL. Behind ingress, request.url is internal — use forwarded headers or PUBLIC_BASE_URL."""
+    if PUBLIC_BASE_URL:
+        return PUBLIC_BASE_URL.rstrip("/") + request.url.path
+    proto = request.headers.get("x-forwarded-proto", "https")
+    host = request.headers.get("x-forwarded-host") or request.headers.get("host", "")
+    return f"{proto}://{host}{request.url.path}"
+
+
+async def _validate_twilio(request: Request, form: dict) -> None:
+    if not TWILIO_VALIDATE_SIGNATURE:
+        return
+    if not TWILIO_AUTH_TOKEN:
+        # Not configured yet — allow during initial setup
+        logger.warning("Twilio auth token not set; skipping signature validation")
+        return
+    from twilio.request_validator import RequestValidator
+    validator = RequestValidator(TWILIO_AUTH_TOKEN)
+    sig = request.headers.get("x-twilio-signature", "")
+    url = _reconstruct_public_url(request)
+    if not validator.validate(url, form, sig):
+        logger.warning(f"Twilio signature invalid for url={url}")
+        raise HTTPException(403, "Invalid Twilio signature")
+
+
+def _twiml(body_xml: str) -> Response:
+    xml = f'<?xml version="1.0" encoding="UTF-8"?>\n<Response>{body_xml}</Response>'
+    return Response(content=xml, media_type="application/xml")
+
+
+@api_router.post("/twilio/sms")
+async def twilio_sms(request: Request):
+    """Twilio webhook: inbound SMS → run through Sheldon's brain → respond with TwiML <Message>."""
+    form = dict(await request.form())
+    await _validate_twilio(request, form)
+
+    body = (form.get("Body") or "").strip()
+    from_number = form.get("From") or "unknown"
+
+    if not body:
+        return _twiml("<Message>Send me something to work with, mate.</Message>")
+
+    logger.info(f"[Twilio SMS] from={from_number} body={body[:80]!r}")
+    try:
+        reply = await chat_with_sheldon(session_id="main", user_text=body, channel="sms")
+    except HTTPException as he:
+        return _twiml(f"<Message>{_xml_escape(he.detail)}</Message>")
+    except Exception:
+        logger.exception("SMS chat error")
+        return _twiml("<Message>Sheldon's a bit busy — try again in a sec.</Message>")
+
+    # SMS hard cap (Twilio handles segmenting up to 1600, but keep it sensible)
+    if len(reply) > 1500:
+        reply = reply[:1497] + "..."
+    return _twiml(f"<Message>{_xml_escape(reply)}</Message>")
+
+
+@api_router.post("/twilio/voice")
+async def twilio_voice(request: Request):
+    """Twilio webhook: inbound voice call → greet + open a Gather to listen for the caller."""
+    form = dict(await request.form())
+    await _validate_twilio(request, form)
+    from_number = form.get("From") or "unknown"
+    logger.info(f"[Twilio Voice] inbound call from={from_number}")
+
+    greeting = _xml_escape("G'day, Sheldon here. What're we drinking tonight?")
+    # Use Polly's en-AU male voice "Russell"; speechTimeout=auto lets caller finish naturally.
+    body = (
+        f'<Say voice="Polly.Russell" language="en-AU">{greeting}</Say>'
+        '<Gather input="speech" speechTimeout="auto" language="en-AU" '
+        'action="/api/twilio/voice/gather" method="POST">'
+        '</Gather>'
+        '<Say voice="Polly.Russell" language="en-AU">Didn\'t catch that. Catch you later.</Say>'
+        '<Hangup/>'
+    )
+    return _twiml(body)
+
+
+@api_router.post("/twilio/voice/gather")
+async def twilio_voice_gather(request: Request):
+    """Twilio webhook: caller's speech was transcribed (SpeechResult). Run through brain, speak the reply, gather next."""
+    form = dict(await request.form())
+    await _validate_twilio(request, form)
+
+    spoken = (form.get("SpeechResult") or "").strip()
+    confidence = float(form.get("Confidence") or 0)
+    logger.info(f"[Twilio Voice] gather speech={spoken!r} confidence={confidence}")
+
+    # Caller said nothing → polite goodbye
+    if not spoken:
+        body = (
+            '<Say voice="Polly.Russell" language="en-AU">Alright, all yours. Catch you next round.</Say>'
+            '<Hangup/>'
+        )
+        return _twiml(body)
+
+    # Hang-up triggers
+    if any(p in spoken.lower() for p in ["goodbye", "bye", "hang up", "end call", "that's all", "cheers mate"]):
+        body = (
+            '<Say voice="Polly.Russell" language="en-AU">Cheers mate. See ya.</Say>'
+            '<Hangup/>'
+        )
+        return _twiml(body)
+
+    try:
+        reply = await chat_with_sheldon(session_id="main", user_text=spoken, channel="voice")
+    except HTTPException as he:
+        body = (
+            f'<Say voice="Polly.Russell" language="en-AU">{_xml_escape(he.detail)}</Say>'
+            '<Hangup/>'
+        )
+        return _twiml(body)
+    except Exception:
+        logger.exception("Voice chat error")
+        body = (
+            '<Say voice="Polly.Russell" language="en-AU">Bit of static on my end. Try again in a sec.</Say>'
+            '<Hangup/>'
+        )
+        return _twiml(body)
+
+    # Speak reply, then open the next Gather to keep the conversation going
+    safe_reply = _xml_escape(reply)
+    body = (
+        f'<Say voice="Polly.Russell" language="en-AU">{safe_reply}</Say>'
+        '<Gather input="speech" speechTimeout="auto" language="en-AU" '
+        'action="/api/twilio/voice/gather" method="POST">'
+        '</Gather>'
+        '<Say voice="Polly.Russell" language="en-AU">Still there? Catch you later.</Say>'
+        '<Hangup/>'
+    )
+    return _twiml(body)
+
+
+@api_router.get("/twilio/status")
+async def twilio_status():
+    """Quick check of Twilio configuration (no secrets exposed)."""
+    return {
+        "configured": bool(TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN and TWILIO_PHONE_NUMBER),
+        "has_account_sid": bool(TWILIO_ACCOUNT_SID),
+        "has_auth_token": bool(TWILIO_AUTH_TOKEN),
+        "phone_number_configured": bool(TWILIO_PHONE_NUMBER),
+        "signature_validation": TWILIO_VALIDATE_SIGNATURE,
+        "public_base_url": PUBLIC_BASE_URL or "(auto-detect from request headers)",
+    }
+
+
 # ---------- Chat ----------
-@api_router.post("/chat", response_model=ChatResponse)
-async def chat(req: ChatRequest):
+async def chat_with_sheldon(session_id: str, user_text: str, channel: str = "web") -> str:
+    """Run a message through Sheldon's brain. Persists turns. `channel` adjusts reply style."""
     if not EMERGENT_LLM_KEY:
         raise HTTPException(500, "EMERGENT_LLM_KEY not configured")
 
     # Persist user message
-    user_msg = StoredMessage(session_id=req.session_id, role="user", content=req.message)
+    user_msg = StoredMessage(session_id=session_id, role="user", content=user_text)
     await db.chat_messages.insert_one(user_msg.model_dump())
 
-    # Build system prompt with live context
+    # Build system prompt with live context + per-channel addendum
     system_prompt = await build_sheldon_system_prompt()
+    if channel == "sms":
+        system_prompt += (
+            "\n\nCHANNEL: SMS — Keep your reply under 320 characters (2 SMS segments). "
+            "Plain text only — no markdown, no lists, no bullet points. Be tight and conversational."
+        )
+    elif channel == "voice":
+        system_prompt += (
+            "\n\nCHANNEL: PHONE CALL — You're being spoken aloud over a phone. "
+            "Keep replies under 35 words. No markdown, no lists, no bullet points, no headers. "
+            "Pure natural speech. Don't read out ml measurements as numbers — say 'fifteen mls' style."
+        )
 
     # Recent history (last 20 messages, excluding the one we just stored)
     recent = await db.chat_messages.find(
-        {"session_id": req.session_id, "id": {"$ne": user_msg.id}},
+        {"session_id": session_id, "id": {"$ne": user_msg.id}},
         {"_id": 0},
     ).sort("timestamp", -1).limit(20).to_list(20)
-    recent.reverse()  # chronological
+    recent.reverse()
 
-    # Frame the request with conversation transcript so Claude sees full context.
     chat_client = LlmChat(
         api_key=EMERGENT_LLM_KEY,
-        session_id=req.session_id,
+        session_id=session_id,
         system_message=system_prompt,
     ).with_model("anthropic", CLAUDE_MODEL)
 
@@ -401,10 +576,10 @@ async def chat(req: ChatRequest):
             "Recent conversation so far (for context, do not repeat):\n"
             f"{transcript}\n\n"
             "Current message from the user:\n"
-            f"{req.message}"
+            f"{user_text}"
         )
     else:
-        framed = req.message
+        framed = user_text
 
     try:
         reply_text = await chat_client.send_message(UserMessage(text=framed))
@@ -419,15 +594,19 @@ async def chat(req: ChatRequest):
         raise HTTPException(500, f"LLM error: {e}")
 
     reply_str = str(reply_text).strip()
-
-    sheldon_msg = StoredMessage(session_id=req.session_id, role="sheldon", content=reply_str)
+    sheldon_msg = StoredMessage(session_id=session_id, role="sheldon", content=reply_str)
     await db.chat_messages.insert_one(sheldon_msg.model_dump())
+    return reply_str
 
+
+@api_router.post("/chat", response_model=ChatResponse)
+async def chat(req: ChatRequest):
+    reply = await chat_with_sheldon(req.session_id, req.message, channel="web")
     return ChatResponse(
         session_id=req.session_id,
         user_message=req.message,
-        reply=reply_str,
-        timestamp=sheldon_msg.timestamp,
+        reply=reply,
+        timestamp=now_iso(),
     )
 
 

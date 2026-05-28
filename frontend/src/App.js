@@ -8,6 +8,7 @@ import ToolsPage from "@/pages/ToolsPage";
 import RegularsPage from "@/pages/RegularsPage";
 import MemoryPage from "@/pages/MemoryPage";
 import InventoryPage from "@/pages/InventoryPage";
+import PhonePage from "@/pages/PhonePage";
 
 function App() {
     return (
@@ -22,6 +23,7 @@ function App() {
                         <Route path="/inventory" element={<InventoryPage />} />
                         <Route path="/regulars" element={<RegularsPage />} />
                         <Route path="/memory" element={<MemoryPage />} />
+                        <Route path="/phone" element={<PhonePage />} />
                     </Routes>
                 </main>
             </BrowserRouter>
