@@ -75,6 +75,16 @@ User started asking "can you give me your source code so I can build an offline 
   - New `/collections` page (nav label: **Crates**) with preset starters (Records/Books/Movies/Playlists), custom icon picker, item detail modal with star ratings.
 - Tested (iteration_5): backend 21/21, frontend full coverage — 100%. One data-hygiene issue (legacy "Sheldon" in historical message content) was caught and patched same iteration via the extended migration.
 
+### Phase 6 (2026-02) — Backend Refactor + Reverse Mood Pairing
+- **Refactor `server.py`**: was a 1100-line monolith — now a 153-line shell. Feature code split into:
+  - `core/config.py`, `core/db.py`, `core/models.py`, `core/brain.py` (chat orchestration, system prompt, clash + record-mention detection)
+  - `routers/{chat,voice,companion,twilio_routes,cocktails,substitutions,ingredients,tools,regulars,memory,inventory,collections}.py`
+  - All endpoints under `/api` preserved exactly. Zero behavioural change verified.
+- **Reverse mood pairing (record → cocktail)**: new `_detect_record_mention()` in `core/brain.py` scans the user's message for (a) a music-intent keyword (play/spin/put on/listening to/throw on/queue up/vinyl/record/lp/album/needle/turntable) AND (b) any record title (or its artist or album half) literally present in the user's Records collection. On a hit, injects a "REVERSE MOOD PAIRING TRIGGER" block into the system prompt with the record's tags, prompting Russell to suggest a cocktail matching that record's vibe in one casual line.
+- **Record context enrichment**: system prompt now embeds the per-record mood/genre tags in brackets so Russell has them as pairing cues.
+- **Chat persistence fix carried over**: messages persisted atomically AFTER successful LLM call — no orphan user msgs on errors.
+- Tested (iteration_6): backend 26/26 (100%). Verified pairing fires for "spun up Rastaman Vibrations" (reggae match) and stays quiet for non-music input or records not in the collection (no fabrication).
+
 ## Prioritized Backlog
 ### P0 (Phase 5 — Raspberry Pi)
 - [ ] Pi client: wake word (Porcupine "Hey Sheldon") → record → hit cloud Brain API → audio playback
@@ -90,11 +100,13 @@ User started asking "can you give me your source code so I can build an offline 
 ## Known Constraints
 - Emergent Universal Key has a per-request budget cap; long chats can hit it. Topping up balance or using a personal Anthropic key removes the cap.
 
-## File Map
-- `/app/backend/server.py` — all API routes
+## File Map (current — post Phase 6 refactor)
+- `/app/backend/server.py` — thin app shell (lifecycle + CORS + router mounting)
+- `/app/backend/core/{config,db,models,brain}.py` — shared infra
+- `/app/backend/routers/*.py` — one file per feature area
+- `/app/backend/companion.py` — weather/time grounding helpers
 - `/app/backend/seed_data.py` — initial cocktails/ingredients/clash rules
 - `/app/frontend/src/App.js` — routes
-- `/app/frontend/src/pages/*` — Chat, Cocktails, Tools, Inventory, Regulars, Memory
-- `/app/frontend/src/components/Topbar.jsx`, `PageHeader.jsx`
+- `/app/frontend/src/pages/*` — Chat, Cocktails, Tools, Inventory, Regulars, Memory, Phone, Collections
+- `/app/frontend/src/components/Topbar.jsx`, `PageHeader.jsx`, `VoiceControls.jsx`
 - `/app/frontend/src/lib/api.js`
-ib/api.js`
