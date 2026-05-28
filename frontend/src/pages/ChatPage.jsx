@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { PaperPlaneRight, Trash, Sparkle } from "@phosphor-icons/react";
 import { Toaster, toast } from "sonner";
+import VoiceControls from "@/components/VoiceControls";
 
 const SUGGESTIONS = [
     "Make me a low-ABV aperitif using gin and grapefruit",
@@ -176,31 +177,49 @@ export default function ChatPage() {
             )}
 
             {/* Composer */}
-            <div className="sticky bottom-4 mt-4 glass rounded-2xl p-2 flex items-end gap-2" data-testid="chat-composer">
-                <textarea
-                    value={input}
-                    onChange={(e) => setInput(e.target.value)}
-                    onKeyDown={(e) => {
-                        if (e.key === "Enter" && !e.shiftKey) {
-                            e.preventDefault();
-                            send();
+            <div className="sticky bottom-4 mt-4 glass rounded-2xl p-3 relative" data-testid="chat-composer">
+                <div className="flex items-end gap-2">
+                    <textarea
+                        value={input}
+                        onChange={(e) => setInput(e.target.value)}
+                        onKeyDown={(e) => {
+                            if (e.key === "Enter" && !e.shiftKey) {
+                                e.preventDefault();
+                                send();
+                            }
+                        }}
+                        placeholder="Ask Sheldon anything…"
+                        rows={1}
+                        className="flex-1 bg-transparent border-none outline-none px-3 py-3 text-base resize-none"
+                        style={{ color: "var(--text-primary)", maxHeight: 200 }}
+                        data-testid="chat-input"
+                    />
+                    <button
+                        onClick={() => send()}
+                        disabled={!input.trim() || sending}
+                        className="btn-amber flex items-center gap-2"
+                        data-testid="chat-send-btn"
+                    >
+                        <PaperPlaneRight size={16} weight="bold" />
+                        <span className="hidden sm:inline">Send</span>
+                    </button>
+                </div>
+                <div className="flex items-center justify-between gap-2 mt-2 px-1">
+                    <VoiceControls
+                        onTranscript={(text) => {
+                            // Auto-send transcribed speech
+                            send(text);
+                        }}
+                        sheldonLastReply={
+                            messages.length > 0 && messages[messages.length - 1].role === "sheldon"
+                                ? messages[messages.length - 1].content
+                                : ""
                         }
-                    }}
-                    placeholder="Ask Sheldon anything…"
-                    rows={1}
-                    className="flex-1 bg-transparent border-none outline-none px-3 py-3 text-base resize-none"
-                    style={{ color: "var(--text-primary)", maxHeight: 200 }}
-                    data-testid="chat-input"
-                />
-                <button
-                    onClick={() => send()}
-                    disabled={!input.trim() || sending}
-                    className="btn-amber flex items-center gap-2"
-                    data-testid="chat-send-btn"
-                >
-                    <PaperPlaneRight size={16} weight="bold" />
-                    <span className="hidden sm:inline">Send</span>
-                </button>
+                    />
+                    <span className="text-xs hidden md:inline" style={{ color: "var(--text-muted)" }}>
+                        Enter to send · Shift+Enter for newline · Space to talk
+                    </span>
+                </div>
             </div>
         </div>
     );

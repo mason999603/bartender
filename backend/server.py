@@ -3,11 +3,12 @@
 Phase 1: Web chat + cocktail brain + tools.
 Future: voice (Whisper/TTS), telephony (Twilio), Raspberry Pi deploy.
 """
-from fastapi import FastAPI, APIRouter, HTTPException
+from fastapi import FastAPI, APIRouter, HTTPException, UploadFile, File
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
+import io
 import logging
 from pathlib import Path
 from pydantic import BaseModel, Field
@@ -16,6 +17,7 @@ import uuid
 from datetime import datetime, timezone
 
 from emergentintegrations.llm.chat import LlmChat, UserMessage
+from emergentintegrations.llm.openai import OpenAISpeechToText
 
 from seed_data import INGREDIENTS, COCKTAILS, CLASH_RULES, SUBSTITUTIONS
 
@@ -312,6 +314,53 @@ Reference these naturally when relevant. Don't recite them verbatim — use them
 @api_router.get("/")
 async def root():
     return {"app": "Sheldon", "status": "behind the stick"}
+
+
+# ---------- Voice (STT) ----------
+@api_router.post("/voice/transcribe")
+async def voice_transcribe(audio: UploadFile = File(...)):
+    """Transcribe an uploaded audio blob via OpenAI Whisper. Used by web push-to-talk."""
+    if not EMERGENT_LLM_KEY:
+        raise HTTPException(500, "EMERGENT_LLM_KEY not configured")
+
+    contents = await audio.read()
+    if len(contents) > 25 * 1024 * 1024:
+        raise HTTPException(413, "Audio too large (25 MB max)")
+    if len(contents) < 500:
+        # Too small to be real audio — silence/empty
+        return {"text": ""}
+
+    # OpenAI's API uses the file's name to detect format — ensure a known extension.
+    fname = audio.filename or "voice.webm"
+    if "." not in fname:
+        ct = (audio.content_type or "").lower()
+        ext = "webm" if "webm" in ct else "mp4" if "mp4" in ct else "wav"
+        fname = f"voice.{ext}"
+
+    buf = io.BytesIO(contents)
+    buf.name = fname
+
+    stt = OpenAISpeechToText(api_key=EMERGENT_LLM_KEY)
+    try:
+        response = await stt.transcribe(
+            file=buf,
+            model="whisper-1",
+            response_format="json",
+            language="en",
+            prompt="A bartender talking about cocktails, spirits, ingredients, recipes, and bar service.",
+        )
+    except Exception as e:
+        msg = str(e).lower()
+        logger.exception("STT error")
+        if "budget" in msg and "exceeded" in msg:
+            raise HTTPException(
+                429,
+                "Sheldon's tab is closed for the day, mate — Emergent LLM key budget exceeded.",
+            )
+        raise HTTPException(500, f"Transcription failed: {e}")
+
+    text = getattr(response, "text", None) or ""
+    return {"text": text.strip()}
 
 
 # ---------- Chat ----------

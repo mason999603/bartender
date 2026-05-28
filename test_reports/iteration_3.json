@@ -1,0 +1,41 @@
+{
+  "summary": "Phase 3 (Voice on Web) testing complete. Backend: 9/9 pytest passed including real Whisper STT call on ffmpeg-generated WAV via emergentintegrations OpenAISpeechToText (model=whisper-1). Frontend: all VoiceControls data-testids render, settings panel opens with mode/tts/voice select/preview, localStorage persistence verified (sheldon-mode, sheldon-tts) across reload, mic permission denial gracefully shows 'Mic blocked' status without crashing.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Chat composer / voice settings panel", "issues": ["When open, the absolute-positioned settings panel (320px wide, anchored bottom:80 right:12 of composer) slightly overlaps the 'Send' button. Cosmetic — interaction still works since panel has a close (X). Could nudge horizontal offset or shift z-index/origin if main agent wants a cleaner look."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_voice.py",
+    "/app/test_reports/pytest/phase3_voice_results.xml",
+    "/app/backend/tests/test_phase2.py",
+    "/app/backend/tests/test_sheldon_api.py"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py STT route correctly handles: missing EMERGENT_LLM_KEY (500), >25MB (413), <500B (graceful empty), missing filename (synthesizes voice.{webm|mp4|wav} from content-type), budget-exceeded LLM error (429 with a Sheldon-flavoured message). Logic is tight.",
+    "VoiceControls.jsx cleans up MediaStream tracks + AudioContext + RAF on unmount and on stop — good. The cleanupStreams() closes audioCtx inside a try/catch, safe.",
+    "VAD threshold (avg byte-bin > 12, silence_ms 1200) is reasonable; document constants if they need tuning per-device.",
+    "Speak-reply useEffect dedupes via lastSpokenRef so the same reply is not re-spoken on re-render — nice.",
+    "Spacebar push-to-talk is wired only when mode==='push' and skipped when an INPUT/TEXTAREA/contentEditable is focused. Correct.",
+    "Minor: settings panel uses position:absolute relative to the composer div (composer now has class 'relative'). Verified panel renders inside viewport; on narrow viewports it falls back to maxWidth: calc(100vw - 24px).",
+    "Minor: continuous-mode auto-restart calls startRecording() via setTimeout — fine, but rapid restart cycles could create transient AudioContexts. Already mitigated by cleanupStreams() before each handleStop.",
+    "server.py is now ~745 lines; voice route is small but Phase 3 is a natural moment to split into /app/backend/routers/{chat,voice,cocktails,...}.py."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_voice.py (new — 9 tests)"
+  ],
+  "success_rate": {"backend": "100% (9/9 phase3 + regression)", "frontend": "100% (all 11 Phase 3 UI checks)"},
+  "test_credentials": "N/A — single-user app, no auth.",
+  "seed_data_creation": "None new. Used ffmpeg-generated /tmp/test.wav (1s 440Hz sine, 32KB) for real Whisper transcription call.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Phase 3 voice is solid. /api/voice/transcribe verified end-to-end against real Whisper (whisper-1) via EMERGENT_LLM_KEY — sine-wave WAV returns 200 with text:'' (silence-detected by Whisper) which is the correct behaviour for pure-tone input. To test with spoken audio, generate via espeak/festival or any short voice WAV. Frontend VoiceControls component renders all expected data-testids (mic-button, voice-settings-toggle, stop-tts, voice-settings-panel, mode-push, mode-continuous, tts-toggle, voice-select, voice-preview, mic-status). localStorage keys: sheldon-mode (push|continuous), sheldon-tts (on|off), sheldon-voice (voice name). ffmpeg was installed in this iteration (apt install ffmpeg) — should persist for next runs.",
+  "rca of the issue": "No outstanding issues. All Phase 3 functionality working as specified."
+}
