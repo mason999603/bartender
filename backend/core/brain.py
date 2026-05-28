@@ -15,6 +15,7 @@ from emergentintegrations.llm.chat import LlmChat, UserMessage
 from .config import EMERGENT_LLM_KEY, CLAUDE_MODEL
 from .db import db
 from .models import StoredMessage
+from .actions import ACTIONS_PROMPT, parse_and_execute
 from companion import build_companion_context
 
 logger = logging.getLogger("russell.brain")
@@ -196,13 +197,18 @@ Reference these naturally when relevant. Don't recite them verbatim — use them
 """
 
 
-async def chat_with_russell(session_id: str, user_text: str, channel: str = "web") -> str:
-    """Run a message through Russell's brain. Persists turns. `channel` adjusts reply style."""
+async def chat_with_russell(session_id: str, user_text: str, channel: str = "web") -> tuple[str, list[dict]]:
+    """Run a message through Russell's brain. Persists turns. `channel` adjusts reply style.
+
+    Returns (cleaned_reply, executed_actions). Actions are mutations Russell performed on
+    user data (saving cocktails, adding to collections, etc.) — see core/actions.py.
+    """
     if not EMERGENT_LLM_KEY:
         raise HTTPException(500, "EMERGENT_LLM_KEY not configured")
 
-    # Build system prompt with live context + per-channel addendum + real-time companion grounding
+    # Build system prompt with live context + actions schema + per-channel addendum + real-time grounding
     system_prompt = await build_russell_system_prompt()
+    system_prompt += "\n" + ACTIONS_PROMPT
 
     companion_block = await build_companion_context(db, user_text)
     if companion_block:
@@ -283,10 +289,13 @@ async def chat_with_russell(session_id: str, user_text: str, channel: str = "web
 
     reply_str = str(reply_text).strip()
 
+    # Strip & execute any <russell_actions> block before persisting the visible reply.
+    cleaned_reply, executed_actions = await parse_and_execute(reply_str)
+
     # Persist BOTH turns only after a successful reply — keeps history clean if the
     # LLM call fails (no orphaned user messages with no response).
     user_msg = StoredMessage(session_id=session_id, role="user", content=user_text)
-    russell_msg = StoredMessage(session_id=session_id, role="russell", content=reply_str)
+    russell_msg = StoredMessage(session_id=session_id, role="russell", content=cleaned_reply)
     await db.chat_messages.insert_many([user_msg.model_dump(), russell_msg.model_dump()])
 
-    return reply_str
+    return cleaned_reply, executed_actions

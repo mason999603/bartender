@@ -66,6 +66,29 @@ export default function ChatPage() {
                 timestamp: res.data.timestamp,
             };
             setMessages((m) => [...m, russellReply]);
+
+            // Surface any actions Russell took (saved cocktails, added to collections, etc.)
+            const actions = res.data.actions || [];
+            for (const a of actions) {
+                if (!a.ok) {
+                    toast.error(`Couldn't save (${a.type}): ${a.error || "unknown"}`);
+                    continue;
+                }
+                const r = a.result || {};
+                if (r.kind === "cocktail") {
+                    toast.success(`Saved '${r.name}' to your Library`, { duration: 4000 });
+                } else if (r.kind === "collection_item") {
+                    const newCol = r.collection_created ? ` (new collection)` : "";
+                    toast.success(`Added '${r.title}' → ${r.collection_name}${newCol}`, { duration: 4000 });
+                } else if (r.kind === "collection") {
+                    toast.success(`Created collection '${r.name}'`, { duration: 4000 });
+                } else if (r.kind === "memory") {
+                    toast.success(`Remembered: ${r.key}`, { duration: 4000 });
+                } else if (r.kind === "inventory") {
+                    const verb = r.in_stock ? "back in stock" : "86'd";
+                    toast.success(`${r.name} marked ${verb}`, { duration: 4000 });
+                }
+            }
         } catch (e) {
             console.error(e);
             toast.error("Russell's down for a smoke. Try again in a sec.");

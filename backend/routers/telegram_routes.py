@@ -228,7 +228,7 @@ async def telegram_webhook(
     await _send_typing(chat_id)
 
     try:
-        reply = await chat_with_russell(session_id="main", user_text=text, channel="telegram")
+        reply, actions = await chat_with_russell(session_id="main", user_text=text, channel="telegram")
     except HTTPException as he:
         await _send_message(chat_id, str(he.detail))
         return {"ok": True}
@@ -236,6 +236,12 @@ async def telegram_webhook(
         logger.exception("[telegram] chat error")
         await _send_message(chat_id, "Russell's a bit foggy — try again in a sec.")
         return {"ok": True}
+
+    # If Russell saved anything, append a small confirmation marker so the user sees it on Telegram.
+    from core.actions import summarize_for_channel
+    suffix = summarize_for_channel(actions)
+    if suffix:
+        reply = (reply + "\n\n" + suffix.strip()).strip()
 
     await _send_message(chat_id, reply, reply_to=msg_id)
     return {"ok": True}

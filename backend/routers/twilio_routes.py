@@ -70,7 +70,7 @@ async def twilio_sms(request: Request):
 
     logger.info(f"[Twilio SMS] from={from_number} body={body[:80]!r}")
     try:
-        reply = await chat_with_russell(session_id="main", user_text=body, channel="sms")
+        reply, _actions = await chat_with_russell(session_id="main", user_text=body, channel="sms")
     except HTTPException as he:
         return _twiml(f"<Message>{_xml_escape(he.detail)}</Message>")
     except Exception:
@@ -127,7 +127,7 @@ async def twilio_voice_gather(request: Request):
         return _twiml(body)
 
     try:
-        reply = await chat_with_russell(session_id="main", user_text=spoken, channel="voice")
+        reply, _actions = await chat_with_russell(session_id="main", user_text=spoken, channel="voice")
     except HTTPException as he:
         body = (
             f'<Say voice="Polly.Russell" language="en-AU">{_xml_escape(he.detail)}</Say>'

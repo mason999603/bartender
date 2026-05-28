@@ -21,6 +21,7 @@ class ChatResponse(BaseModel):
     user_message: str
     reply: str
     timestamp: str
+    actions: List[dict] = []  # Russell's side-effects this turn — see core/actions.py
 
 
 class StoredMessage(BaseModel):
