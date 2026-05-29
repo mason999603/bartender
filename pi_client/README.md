@@ -52,13 +52,13 @@ You'll need:
 *If you skip this step, the client falls back to the built-in word "computer" for testing.*
 
 ### 3. Download a Piper voice
-Pick the Aussie southern English male voice — sounds like Russell should:
+Piper doesn't ship a true Aussie voice (yet), so we use **`en_GB/northern_english_male`** — gruff working-class English bloke, closest fit to Russell's vibe and miles better than any American option. Two files, ~63MB:
 
 ```bash
 mkdir -p voices
 cd voices
-wget https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_AU/southern_english_male/medium/en_AU-southern_english_male-medium.onnx
-wget https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_AU/southern_english_male/medium/en_AU-southern_english_male-medium.onnx.json
+wget https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_GB/northern_english_male/medium/en_GB-northern_english_male-medium.onnx
+wget https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_GB/northern_english_male/medium/en_GB-northern_english_male-medium.onnx.json
 cd ..
 ```
 
