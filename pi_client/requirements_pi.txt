@@ -8,7 +8,7 @@ python-dotenv>=1.0.0
 # Audio I/O (PortAudio binding — easier to install on Pi than pyaudio)
 # On Raspberry Pi OS: sudo apt install -y libportaudio2 portaudio19-dev
 sounddevice>=0.4.6
-numpy>=1.24.0,<2.0
+numpy>=1.24.0
 soundfile>=0.12.1
 
 # Wake word engine — fully open-source, no API keys, runs on-device
