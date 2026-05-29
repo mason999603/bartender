@@ -12,8 +12,14 @@ numpy>=1.24.0
 soundfile>=0.12.1
 
 # Wake word engine — fully open-source, no API keys, runs on-device
-openwakeword>=0.6.0
+# We install it manually with --no-deps to skip tflite-runtime (which doesn't
+# have Python 3.13 wheels) — we run it in ONNX mode via onnxruntime instead.
+# See README "On the Pi" section for the install command.
 onnxruntime>=1.16.0
+tqdm>=4.0
+scipy>=1.3
+scikit-learn>=1.0
+mutagen>=1.45
 
 # TTS — local, offline, gruff English voice
 piper-tts>=1.2.0

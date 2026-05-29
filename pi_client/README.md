@@ -71,11 +71,15 @@ sudo apt install -y python3-venv python3-pip libportaudio2 portaudio19-dev libsn
 
 ### 5. Set up the Python environment
 ```bash
-cd /opt/russell    # or wherever you cloned the pi_client folder
+cd /opt/russell/pi_client    # or wherever you cloned the pi_client folder
 python3 -m venv venv
 source venv/bin/activate
 pip install --upgrade pip
 pip install -r requirements_pi.txt
+
+# openwakeword has a hard dep on tflite-runtime which doesn't ship Python 3.13
+# wheels. We use ONNX mode instead, so install it without that dep:
+pip install --no-deps openwakeword
 ```
 
 ### 6. Configure your .env
