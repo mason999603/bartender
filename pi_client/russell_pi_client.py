@@ -1,10 +1,10 @@
 """Russell on the Pi — wake-word-triggered voice loop.
 
 Usage on the Pi:
-    cd /opt/russell && ./venv/bin/python russell_pi_client.py
+    cd /opt/russell/pi_client && ./venv/bin/python russell_pi_client.py
 
 Flow:
-    Mic → Porcupine (wake word "Hey Russell") → record until silence →
+    Mic → openWakeWord ("Hey Jarvis" by default) → record until silence →
     POST audio to /api/voice/transcribe (Whisper) → POST text to /api/chat →
     Piper TTS → play Russell's reply → back to wake-word listening.
 
@@ -16,7 +16,6 @@ import argparse
 import logging
 import os
 import signal
-import struct
 import sys
 import time
 from pathlib import Path
@@ -26,8 +25,6 @@ import numpy as np
 import requests
 import sounddevice as sd
 from dotenv import load_dotenv
-
-import pvporcupine
 
 # Load env from this script's dir
 ROOT = Path(__file__).resolve().parent
@@ -49,8 +46,8 @@ logger = logging.getLogger("russell.pi")
 class Config:
     backend_url: str
     session_id: str
-    porcupine_key: str
-    keyword_path: Optional[str]
+    wake_model: str
+    wake_threshold: float
     input_device: Optional[int]
     output_device: Optional[int]
     vad_threshold: float
@@ -73,8 +70,8 @@ def load_config() -> Config:
     c = Config()
     c.backend_url = (os.environ.get("RUSSELL_BACKEND_URL") or "").rstrip("/")
     c.session_id = os.environ.get("RUSSELL_SESSION_ID") or "main"
-    c.porcupine_key = os.environ.get("PORCUPINE_ACCESS_KEY") or ""
-    c.keyword_path = (os.environ.get("PORCUPINE_KEYWORD_PATH") or "").strip() or None
+    c.wake_model = (os.environ.get("WAKE_WORD_MODEL") or "hey_jarvis").strip()
+    c.wake_threshold = float(os.environ.get("WAKE_WORD_THRESHOLD") or 0.5)
     c.input_device = _int_or_none(os.environ.get("INPUT_DEVICE_INDEX"))
     c.output_device = _int_or_none(os.environ.get("OUTPUT_DEVICE_INDEX"))
     c.vad_threshold = float(os.environ.get("VAD_SILENCE_THRESHOLD") or 0.015)
@@ -87,12 +84,8 @@ def load_config() -> Config:
     missing: list[str] = []
     if not c.backend_url:
         missing.append("RUSSELL_BACKEND_URL")
-    if not c.porcupine_key:
-        missing.append("PORCUPINE_ACCESS_KEY")
     if not Path(c.piper_voice_path).expanduser().exists():
         missing.append(f"PIPER_VOICE_PATH (file not found: {c.piper_voice_path})")
-    if c.keyword_path and not Path(c.keyword_path).expanduser().exists():
-        missing.append(f"PORCUPINE_KEYWORD_PATH (file not found: {c.keyword_path})")
     if missing:
         logger.error("Config problems — fix /app/pi_client/.env then restart:")
         for m in missing:
@@ -126,35 +119,51 @@ class RussellAPI:
 # Wake-word loop
 # ============================================================
 class WakeWordListener:
-    """Streams mic frames into Porcupine until a wake-word fires."""
+    """Streams mic frames into openWakeWord until a wake-word fires.
 
-    def __init__(self, access_key: str, keyword_path: Optional[str], input_device: Optional[int]):
-        kwargs = {"access_key": access_key}
-        if keyword_path:
-            kwargs["keyword_paths"] = [keyword_path]
+    openWakeWord is fully open-source, runs on-device, and ships pre-trained models
+    like "hey_jarvis", "alexa", "hey_mycroft", "hey_rhasspy". You can also pass a path
+    to a custom .onnx model you trained yourself.
+
+    Audio format expected by the models: 16 kHz, mono, int16, 80ms chunks (1280 samples).
+    """
+
+    SAMPLE_RATE = 16000
+    FRAME_LEN = 1280  # 80ms at 16kHz
+
+    def __init__(self, wake_model: str, threshold: float, input_device: Optional[int]):
+        # Lazy import — openWakeWord pulls in onnxruntime, slow to import on Pi.
+        from openwakeword.model import Model as OWWModel
+        from openwakeword.utils import download_models
+
+        # Ensure the bundled models are on disk. No-op after first run.
+        download_models()
+
+        # Either a bundled model name or a path to a custom .onnx file.
+        kwargs: dict = {"inference_framework": "onnx"}
+        if wake_model.endswith(".onnx") or wake_model.endswith(".tflite"):
+            kwargs["wakeword_models"] = [wake_model]
         else:
-            # Fallback for testing without a custom .ppn — Porcupine ships built-in keywords.
-            kwargs["keywords"] = ["computer"]
-            logger.warning(
-                "No PORCUPINE_KEYWORD_PATH set — falling back to built-in 'computer' keyword. "
-                "Train 'Hey Russell' at https://console.picovoice.ai/ for the real deal."
-            )
-        self.porcupine = pvporcupine.create(**kwargs)
+            kwargs["wakeword_models"] = [wake_model]
+
+        self.model = OWWModel(**kwargs)
+        self.threshold = threshold
+        self.wake_model_name = wake_model
         self.input_device = input_device
         self.stream: Optional[sd.RawInputStream] = None
 
     def __enter__(self):
         self.stream = sd.RawInputStream(
-            samplerate=self.porcupine.sample_rate,
-            blocksize=self.porcupine.frame_length,
+            samplerate=self.SAMPLE_RATE,
+            blocksize=self.FRAME_LEN,
             dtype="int16",
             channels=1,
             device=self.input_device,
         )
         self.stream.start()
         logger.info(
-            f"Listening for wake word… (sr={self.porcupine.sample_rate}, "
-            f"frame={self.porcupine.frame_length}, device={self.input_device})"
+            f"Listening for wake word '{self.wake_model_name}'… "
+            f"(threshold={self.threshold}, device={self.input_device})"
         )
         return self
 
@@ -162,17 +171,17 @@ class WakeWordListener:
         if self.stream:
             self.stream.stop()
             self.stream.close()
-        self.porcupine.delete()
 
     def wait_for_wake(self) -> None:
-        """Blocks until the wake word fires."""
-        frame_len = self.porcupine.frame_length
+        """Blocks until any loaded wake-word's score crosses the threshold."""
         while True:
-            data, _ = self.stream.read(frame_len)
-            # data is bytes (int16); pack into the format porcupine expects.
-            pcm = struct.unpack_from("h" * frame_len, data)
-            if self.porcupine.process(pcm) >= 0:
-                return
+            data, _ = self.stream.read(self.FRAME_LEN)
+            audio = np.frombuffer(bytes(data), dtype=np.int16)
+            predictions = self.model.predict(audio)
+            for _name, score in predictions.items():
+                if score >= self.threshold:
+                    logger.debug(f"wake fired: {_name}={score:.3f}")
+                    return
 
 
 # ============================================================
@@ -211,7 +220,7 @@ def main() -> int:
 
     while not stop_flag["stop"]:
         try:
-            with WakeWordListener(cfg.porcupine_key, cfg.keyword_path, cfg.input_device) as listener:
+            with WakeWordListener(cfg.wake_model, cfg.wake_threshold, cfg.input_device) as listener:
                 listener.wait_for_wake()
             logger.info("Wake word fired.")
             if cfg.wake_ack_sound:

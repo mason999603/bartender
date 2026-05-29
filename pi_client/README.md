@@ -38,18 +38,19 @@ You'll need:
 
 ## One-time setup
 
-### 1. Get a Picovoice Access Key (free)
-1. Sign up at https://console.picovoice.ai/ (free personal tier)
-2. Copy your **Access Key** from the dashboard
+### 1. Wake word (openWakeWord — free, open-source, no signup)
+The Pi listens locally for **"Hey Jarvis"** by default — closest pre-trained model to Russell's vibe. He still introduces himself as Russell once he answers. To use a different built-in model, edit `WAKE_WORD_MODEL` in `.env`:
+- `hey_jarvis` ← default, recommended
+- `alexa`
+- `hey_mycroft`
+- `hey_rhasspy`
 
-### 2. Train a custom "Hey Russell" wake word (free)
-1. In the Picovoice console → **Porcupine → Train a Wake Word**
-2. Phrase: `Hey Russell`
-3. Platform: **Raspberry Pi (arm64)** — important!
-4. Click **Train** and wait ~30 seconds
-5. Download the `.ppn` file → save it to `pi_client/keywords/hey_russell_raspberry-pi.ppn`
+Models download automatically the first time the client starts (~10MB).
 
-*If you skip this step, the client falls back to the built-in word "computer" for testing.*
+If you'd rather train a custom "Hey Russell" model later, the [openWakeWord training guide](https://github.com/dscripka/openWakeWord#training-new-models) walks through it (Google Colab, ~few hours of compute, free). Drop the resulting `.onnx` into `keywords/` and point `WAKE_WORD_MODEL` at it.
+
+### 2. Train a custom "Hey Russell" wake word (optional, later)
+Skip for now — the pre-trained "Hey Jarvis" works out of the box.
 
 ### 3. Download a Piper voice
 Piper doesn't ship a true Aussie voice (yet), so we use **`en_GB/northern_english_male`** — gruff working-class English bloke, closest fit to Russell's vibe and miles better than any American option. Two files, ~63MB:
