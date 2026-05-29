@@ -38,12 +38,15 @@ class PiperTTS:
     def synthesize(self, text: str) -> tuple[np.ndarray, int]:
         """Return (samples_int16, sample_rate). Caller plays it back."""
         self._ensure_loaded()
+        sr = self._voice.config.sample_rate
         buf = BytesIO()
         with wave.open(buf, "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)  # int16
+            wf.setframerate(sr)
             self._voice.synthesize(text, wf)
         buf.seek(0)
         with wave.open(buf, "rb") as wf:
-            sr = wf.getframerate()
             n = wf.getnframes()
             raw = wf.readframes(n)
         samples = np.frombuffer(raw, dtype=np.int16)

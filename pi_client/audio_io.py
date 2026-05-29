@@ -1,6 +1,7 @@
 """Audio recording helpers — VAD-bounded capture from the default input.
 
-We record in 16kHz/mono/int16 because that's what both Porcupine and Whisper expect.
+We record at the device's native rate (USB mics are usually 48kHz) then output a
+16kHz wav, which is what Whisper expects.
 """
 from __future__ import annotations
 
@@ -15,9 +16,22 @@ import sounddevice as sd
 
 logger = logging.getLogger("russell.audio")
 
-SAMPLE_RATE = 16000
+TARGET_RATE = 16000  # what Whisper STT expects
 CHANNELS = 1
 DTYPE = "int16"
+
+
+def _pick_input_rate(input_device: Optional[int]) -> int:
+    """Find a sample rate the input device actually supports."""
+    for sr in (TARGET_RATE, 48000, 44100):
+        try:
+            sd.check_input_settings(
+                device=input_device, samplerate=sr, channels=1, dtype=DTYPE
+            )
+            return sr
+        except Exception:
+            continue
+    return 48000  # last-ditch guess
 
 
 def _rms(chunk: np.ndarray) -> float:
@@ -27,6 +41,19 @@ def _rms(chunk: np.ndarray) -> float:
     # int16 max is 32768
     samples = chunk.astype(np.float32) / 32768.0
     return float(np.sqrt(np.mean(samples ** 2)))
+
+
+def _downsample_to_target(audio: np.ndarray, src_rate: int) -> np.ndarray:
+    """Resample int16 audio to TARGET_RATE."""
+    if src_rate == TARGET_RATE or audio.size == 0:
+        return audio
+    from scipy.signal import resample_poly
+    floats = audio.astype(np.float32) / 32768.0
+    gcd = np.gcd(TARGET_RATE, src_rate)
+    up = TARGET_RATE // gcd
+    down = src_rate // gcd
+    resampled = resample_poly(floats, up, down)
+    return np.clip(resampled * 32768.0, -32768, 32767).astype(np.int16)
 
 
 def record_until_silence(
@@ -39,10 +66,11 @@ def record_until_silence(
 ) -> bytes:
     """Record audio from the mic, stopping after `silence_seconds` of quiet OR `max_seconds` total.
 
-    Returns a fully-formed WAV file as bytes (ready to POST to /api/voice/transcribe).
+    Returns a fully-formed 16kHz mono WAV file as bytes (ready to POST to /api/voice/transcribe).
     """
+    device_rate = _pick_input_rate(input_device)
     chunk_ms = 30
-    chunk_samples = int(SAMPLE_RATE * chunk_ms / 1000)
+    chunk_samples = int(device_rate * chunk_ms / 1000)
 
     captured: list[np.ndarray] = []
     silent_chunks_needed = int(silence_seconds * 1000 / chunk_ms)
@@ -54,7 +82,7 @@ def record_until_silence(
     start_time = time.time()
 
     with sd.InputStream(
-        samplerate=SAMPLE_RATE,
+        samplerate=device_rate,
         channels=CHANNELS,
         dtype=DTYPE,
         device=input_device,
@@ -88,13 +116,14 @@ def record_until_silence(
                 silent_count = 0
 
     audio = np.concatenate(captured) if captured else np.zeros(0, dtype=np.int16)
+    audio_16k = _downsample_to_target(audio, device_rate)
 
     buf = io.BytesIO()
     with wave.open(buf, "wb") as wf:
         wf.setnchannels(CHANNELS)
         wf.setsampwidth(2)  # int16
-        wf.setframerate(SAMPLE_RATE)
-        wf.writeframes(audio.tobytes())
+        wf.setframerate(TARGET_RATE)
+        wf.writeframes(audio_16k.tobytes())
     return buf.getvalue()
 
 

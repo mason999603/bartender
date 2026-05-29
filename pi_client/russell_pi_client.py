@@ -128,8 +128,10 @@ class WakeWordListener:
     Audio format expected by the models: 16 kHz, mono, int16, 80ms chunks (1280 samples).
     """
 
-    SAMPLE_RATE = 16000
+    SAMPLE_RATE = 16000  # what openWakeWord expects
+    NATIVE_RATE = 48000  # what most USB mics (Yeti included) actually support
     FRAME_LEN = 1280  # 80ms at 16kHz
+    NATIVE_FRAME_LEN = 3840  # 80ms at 48kHz — we'll downsample 3:1 to 16kHz
 
     def __init__(self, wake_model: str, threshold: float, input_device: Optional[int]):
         # Lazy import — openWakeWord pulls in onnxruntime, slow to import on Pi.
@@ -151,11 +153,30 @@ class WakeWordListener:
         self.wake_model_name = wake_model
         self.input_device = input_device
         self.stream: Optional[sd.RawInputStream] = None
+        # Pick the device's preferred sample rate at __enter__ time.
+        self.device_rate: int = self.NATIVE_RATE
+        self.device_frame_len: int = self.NATIVE_FRAME_LEN
 
     def __enter__(self):
+        # Try 16kHz first (no resampling needed); fall back to 48kHz (USB mic native).
+        for sr in (self.SAMPLE_RATE, 48000, 44100):
+            try:
+                sd.check_input_settings(
+                    device=self.input_device,
+                    samplerate=sr,
+                    channels=1,
+                    dtype="int16",
+                )
+                self.device_rate = sr
+                # 80ms worth of frames at this rate
+                self.device_frame_len = int(sr * 0.08)
+                break
+            except Exception:
+                continue
+
         self.stream = sd.RawInputStream(
-            samplerate=self.SAMPLE_RATE,
-            blocksize=self.FRAME_LEN,
+            samplerate=self.device_rate,
+            blocksize=self.device_frame_len,
             dtype="int16",
             channels=1,
             device=self.input_device,
@@ -163,7 +184,8 @@ class WakeWordListener:
         self.stream.start()
         logger.info(
             f"Listening for wake word '{self.wake_model_name}'… "
-            f"(threshold={self.threshold}, device={self.input_device})"
+            f"(threshold={self.threshold}, device={self.input_device}, "
+            f"rate={self.device_rate}Hz, frame={self.device_frame_len})"
         )
         return self
 
@@ -172,12 +194,27 @@ class WakeWordListener:
             self.stream.stop()
             self.stream.close()
 
+    def _to_16k(self, audio: np.ndarray) -> np.ndarray:
+        """Downsample mic audio to 16kHz int16 mono if needed."""
+        if self.device_rate == self.SAMPLE_RATE:
+            return audio
+        # Simple polyphase resample via scipy (already a dep of openwakeword)
+        from scipy.signal import resample_poly
+        # Float for processing, back to int16 for openWakeWord.
+        floats = audio.astype(np.float32) / 32768.0
+        gcd = np.gcd(self.SAMPLE_RATE, self.device_rate)
+        up = self.SAMPLE_RATE // gcd
+        down = self.device_rate // gcd
+        resampled = resample_poly(floats, up, down)
+        return np.clip(resampled * 32768.0, -32768, 32767).astype(np.int16)
+
     def wait_for_wake(self) -> None:
         """Blocks until any loaded wake-word's score crosses the threshold."""
         while True:
-            data, _ = self.stream.read(self.FRAME_LEN)
+            data, _ = self.stream.read(self.device_frame_len)
             audio = np.frombuffer(bytes(data), dtype=np.int16)
-            predictions = self.model.predict(audio)
+            audio_16k = self._to_16k(audio)
+            predictions = self.model.predict(audio_16k)
             for _name, score in predictions.items():
                 if score >= self.threshold:
                     logger.debug(f"wake fired: {_name}={score:.3f}")
