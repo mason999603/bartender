@@ -153,39 +153,53 @@ class WakeWordListener:
         self.wake_model_name = wake_model
         self.input_device = input_device
         self.stream: Optional[sd.RawInputStream] = None
-        # Pick the device's preferred sample rate at __enter__ time.
+        # Picked at __enter__ time based on what the device actually supports.
         self.device_rate: int = self.NATIVE_RATE
         self.device_frame_len: int = self.NATIVE_FRAME_LEN
+        self.device_channels: int = 1
 
     def __enter__(self):
-        # Try 16kHz first (no resampling needed); fall back to 48kHz (USB mic native).
-        for sr in (self.SAMPLE_RATE, 48000, 44100):
+        # Probe rate/channel combos until one is accepted. USB mics vary wildly —
+        # Yeti prefers 48kHz stereo, but cheaper mics might only do 16kHz mono.
+        last_err: Exception | None = None
+        for sr, channels in [
+            (self.SAMPLE_RATE, 1), (self.SAMPLE_RATE, 2),
+            (48000, 1), (48000, 2),
+            (44100, 1), (44100, 2),
+        ]:
             try:
                 sd.check_input_settings(
                     device=self.input_device,
                     samplerate=sr,
-                    channels=1,
+                    channels=channels,
                     dtype="int16",
                 )
                 self.device_rate = sr
-                # 80ms worth of frames at this rate
+                self.device_channels = channels
                 self.device_frame_len = int(sr * 0.08)
                 break
-            except Exception:
+            except Exception as e:
+                last_err = e
                 continue
+        else:
+            raise RuntimeError(
+                f"No working sample-rate/channel combo for input device {self.input_device}. "
+                f"Last error: {last_err}"
+            )
 
         self.stream = sd.RawInputStream(
             samplerate=self.device_rate,
             blocksize=self.device_frame_len,
             dtype="int16",
-            channels=1,
+            channels=self.device_channels,
             device=self.input_device,
         )
         self.stream.start()
         logger.info(
             f"Listening for wake word '{self.wake_model_name}'… "
             f"(threshold={self.threshold}, device={self.input_device}, "
-            f"rate={self.device_rate}Hz, frame={self.device_frame_len})"
+            f"rate={self.device_rate}Hz, channels={self.device_channels}, "
+            f"frame={self.device_frame_len})"
         )
         return self
 
@@ -194,13 +208,14 @@ class WakeWordListener:
             self.stream.stop()
             self.stream.close()
 
-    def _to_16k(self, audio: np.ndarray) -> np.ndarray:
-        """Downsample mic audio to 16kHz int16 mono if needed."""
+    def _to_16k_mono(self, audio: np.ndarray) -> np.ndarray:
+        """Downsample to 16kHz int16 mono, averaging channels if needed."""
+        # Stereo → mono by averaging.
+        if self.device_channels == 2:
+            audio = audio.reshape(-1, 2).mean(axis=1).astype(np.int16)
         if self.device_rate == self.SAMPLE_RATE:
             return audio
-        # Simple polyphase resample via scipy (already a dep of openwakeword)
         from scipy.signal import resample_poly
-        # Float for processing, back to int16 for openWakeWord.
         floats = audio.astype(np.float32) / 32768.0
         gcd = np.gcd(self.SAMPLE_RATE, self.device_rate)
         up = self.SAMPLE_RATE // gcd
@@ -213,7 +228,7 @@ class WakeWordListener:
         while True:
             data, _ = self.stream.read(self.device_frame_len)
             audio = np.frombuffer(bytes(data), dtype=np.int16)
-            audio_16k = self._to_16k(audio)
+            audio_16k = self._to_16k_mono(audio)
             predictions = self.model.predict(audio_16k)
             for _name, score in predictions.items():
                 if score >= self.threshold:

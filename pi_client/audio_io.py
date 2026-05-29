@@ -21,17 +21,25 @@ CHANNELS = 1
 DTYPE = "int16"
 
 
-def _pick_input_rate(input_device: Optional[int]) -> int:
-    """Find a sample rate the input device actually supports."""
-    for sr in (TARGET_RATE, 48000, 44100):
+def _pick_input_settings(input_device: Optional[int]) -> tuple[int, int]:
+    """Find a sample-rate + channel-count combo the input device supports.
+
+    Returns (sample_rate, channels). USB mics vary — Yeti likes 48k stereo,
+    some cheap mics only do 16k mono. We probe.
+    """
+    for sr, ch in [
+        (TARGET_RATE, 1), (TARGET_RATE, 2),
+        (48000, 1), (48000, 2),
+        (44100, 1), (44100, 2),
+    ]:
         try:
             sd.check_input_settings(
-                device=input_device, samplerate=sr, channels=1, dtype=DTYPE
+                device=input_device, samplerate=sr, channels=ch, dtype=DTYPE
             )
-            return sr
+            return sr, ch
         except Exception:
             continue
-    return 48000  # last-ditch guess
+    return 48000, 1  # last-ditch guess
 
 
 def _rms(chunk: np.ndarray) -> float:
@@ -68,7 +76,7 @@ def record_until_silence(
 
     Returns a fully-formed 16kHz mono WAV file as bytes (ready to POST to /api/voice/transcribe).
     """
-    device_rate = _pick_input_rate(input_device)
+    device_rate, device_channels = _pick_input_settings(input_device)
     chunk_ms = 30
     chunk_samples = int(device_rate * chunk_ms / 1000)
 
@@ -83,7 +91,7 @@ def record_until_silence(
 
     with sd.InputStream(
         samplerate=device_rate,
-        channels=CHANNELS,
+        channels=device_channels,
         dtype=DTYPE,
         device=input_device,
         blocksize=chunk_samples,
@@ -116,6 +124,9 @@ def record_until_silence(
                 silent_count = 0
 
     audio = np.concatenate(captured) if captured else np.zeros(0, dtype=np.int16)
+    # Stereo → mono by averaging channels (the captured frames are interleaved L/R/L/R).
+    if device_channels == 2 and audio.size > 0:
+        audio = audio.reshape(-1, 2).mean(axis=1).astype(np.int16)
     audio_16k = _downsample_to_target(audio, device_rate)
 
     buf = io.BytesIO()
