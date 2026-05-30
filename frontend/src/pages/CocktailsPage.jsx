@@ -294,7 +294,7 @@ export default function CocktailsPage() {
             <PageHeader
                 eyebrow="Cocktail Library"
                 title="The Book"
-                subtitle="44 specs and counting. Tap a card for the full build. Search by name, or filter by flavour."
+                subtitle={`${cocktails.length || 0} specs and counting. Tap a card for the full build. Search by name, or filter by flavour.`}
             >
                 <button
                     onClick={() => setShowCreate(true)}

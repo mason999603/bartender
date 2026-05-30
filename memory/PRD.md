@@ -117,19 +117,26 @@ User started asking "can you give me your source code so I can build an offline 
 - **Cloud brain switched from Claude (Emergent key) to Groq Llama 3.3 70B Versatile.** Same `/api/chat` contract — no frontend changes needed.
 - **STT switched from OpenAI Whisper to Groq Whisper Large V3.** Same `/api/voice/transcribe` contract.
 - **Pi-side TTS reverted from cloud OpenAI TTS back to local Piper** (Aussie male voice, `en_GB-alan-medium.onnx`) piped through `aplay` to bypass ALSA channel-count quirks. Zero per-request cost.
-- **Picovoice Porcupine replaced with openWakeWord** (fully free, ONNX, on-device). Currently using pre-trained `hey_jarvis` model — custom "Hey Russell" .onnx training deferred to next session.
+- **Picovoice Porcupine replaced with openWakeWord** (fully free, ONNX, on-device). Currently using pre-trained `hey_jarvis` model — custom "Hey Russell" .onnx training instructions live at `/app/pi_client/keywords/README.md`.
 - **Blue Yeti / ALSA robustness**: `find_working_input_device()` in `audio_io.py` auto-scans every input device on startup. Survives the USB mic re-enumerating to a different ALSA index between reboots.
 - **Verified live on hardware (2026-05-31)**: Full pipeline working end-to-end — wake fires on "Hey Jarvis", Groq STT transcribes accurately, Llama 3.3 70B replies in-character, Piper speaks the reply through the speaker. Russell is officially alive on free infra.
 
+### Phase 7 (2026-05-31) — Service Mode + Restore Seeds + Pi infra polish
+- **Service Mode UI toggle**: new `ServiceModeContext` provider + pill button in Topbar. Toggles `service-mode` class on `<html>`, persisted to localStorage. Bumps base font-size to 19px and scales nav/inputs/buttons/cards/badges for behind-the-bar glance-ability. Subtle amber stripe on the topbar reminds you it's on.
+- **Restore deleted seeded recipes**: two new admin endpoints — `GET /api/cocktails/admin/deleted-seeds` and `POST /api/cocktails/admin/restore-seeds` (accepts `{"names": ["Margarita"]}` or `{"names": ["*"]}` for everything). Library page shows a "Restore (N)" badge only when tombstones exist; modal lists each one with per-row + restore-all buttons.
+- **Pi systemd unit fixed**: `/app/pi_client/systemd/russell.service` paths corrected — `WorkingDirectory=/opt/russell/pi_client`, venv path inside that dir, ExecStart uses the correct script location. Ready to copy into `/etc/systemd/system/` for boot-time autostart.
+- **Custom wake-word infra**: new `/app/pi_client/keywords/` folder with a `.gitignore` keeping `.onnx` out of git, and a `README.md` walking through openWakeWord's Google Colab training notebook for a free custom "Hey Russell" model.
+- **Tested**: iteration 8 — 8/8 backend pytest, 100% frontend Playwright (toggle persistence, restore modal end-to-end, regressions on /api/chat and /api/cocktails CRUD).
+
 ## Prioritized Backlog
 ### P1 — Next up
-- [ ] **Custom "Hey Russell" wake word** — train a .onnx via openWakeWord's Google Colab notebook (~20 min of samples), drop into `/app/pi_client/keywords/`, point `WAKE_WORD_MODEL` at it.
-- [ ] **systemd autostart** — the unit file exists at `/app/pi_client/systemd/russell.service`. Need to copy into `/etc/systemd/system/` on the Pi and `systemctl enable --now russell` so it runs on boot.
+- [ ] **Train custom "Hey Russell" wake word** via openWakeWord Colab (instructions in `/app/pi_client/keywords/README.md`) — fully on user.
+- [ ] **Install systemd autostart on the Pi**: `sudo cp /opt/russell/pi_client/systemd/russell.service /etc/systemd/system/ && sudo systemctl enable --now russell` — fully on user.
 
 ### P2 — Polish
-- [ ] **Service Mode UI** — bigger fonts, fewer columns, designed for the user to glance at while behind the bar.
-- [ ] **Restore deleted seeds** button in Library (currently tombstoned deletes are permanent unless you flush the `tombstones` collection).
-- [ ] Strip test-time deps from `/app/backend/requirements.txt` (got bloated by past `pip freeze` calls).
+- [ ] Strip test-time deps from `/app/backend/requirements.txt` (deferred — pip resolver conflict between emergentintegrations and litellm needs untangling first).
+- [ ] Dedupe duplicate seeded cocktails in the DB (pre-existing data quirk: "Margarita" and "Apple Pie Martini" appear twice).
+- [ ] Refactor `/admin/*` cocktail routes onto a sub-`APIRouter(prefix="/admin")` for tidier routing (currently relies on declaration order).
 
 ### Notes from chat
 - User's hardware on hand: Blue Yeti USB mic, Bluetooth speaker (AUX-capable), NVMe SSD.

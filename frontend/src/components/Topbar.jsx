@@ -58,6 +58,7 @@ export default function Topbar() {
                     onClick={toggle}
                     className={`service-mode-toggle ${serviceMode ? "is-on" : ""}`}
                     title={serviceMode ? "Switch back to standard view" : "Bigger fonts for behind the bar"}
+                    aria-pressed={serviceMode}
                     data-testid="service-mode-toggle"
                 >
                     <Coffee size={14} weight={serviceMode ? "fill" : "bold"} />
