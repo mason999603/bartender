@@ -77,7 +77,7 @@ def load_config() -> Config:
     c.vad_threshold = float(os.environ.get("VAD_SILENCE_THRESHOLD") or 0.015)
     c.vad_silence_seconds = float(os.environ.get("VAD_SILENCE_SECONDS") or 1.4)
     c.vad_max_seconds = float(os.environ.get("VAD_MAX_RECORD_SECONDS") or 30.0)
-    c.piper_voice_path = os.environ.get("PIPER_VOICE_PATH") or "./voices/en_GB-northern_english_male-medium.onnx"
+    c.piper_voice_path = os.environ.get("PIPER_VOICE_PATH") or "./voices/en_GB-alan-medium.onnx"
     c.wake_ack_sound = (os.environ.get("WAKE_ACK_SOUND") or "").strip() or None
 
     # Validate the bare essentials early — fail fast with a clear message.
