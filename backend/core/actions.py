@@ -101,12 +101,39 @@ RULES — READ CAREFULLY:
 - DON'T mention the actions block to the user — it's invisible to them.
 - For add_collection_item on records, look at the existing tags style from the user's
   collection and match the same shape (Title: "Artist — Album", tags = genre/mood).
+- CRITICAL — JSON VALUE RULES:
+  • `amount_ml` MUST be a real number like `45` or `22.5`. NEVER a placeholder string
+    like "insert_amount", "TBD", or "to taste". If you genuinely don't know the
+    amount, use `0` (zero) — the system treats that as "no measurement specified".
+  • All string fields must be real text or empty string "" — never a placeholder.
+  • Booleans must be `true` or `false` (lowercase), not strings.
+  • If you cannot fill a required field with a real value, OMIT the whole action and
+    ask the user for the missing info in your conversational reply instead.
 """
 
 
 # ============================================================
 # Action runners
 # ============================================================
+
+def _coerce_float(v: Any, field: str = "") -> float:
+    """Best-effort conversion. Falls back to 0.0 instead of throwing so a single
+    junk value (e.g., the 8B model emitting a placeholder string like 'insert_amount')
+    doesn't tank the whole save.
+    """
+    if v is None or v == "":
+        return 0.0
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        # Last-ditch: pull the first number out of the string (handles "45 ml" → 45.0).
+        if isinstance(v, str):
+            m = re.search(r"-?\d+(?:\.\d+)?", v)
+            if m:
+                return float(m.group(0))
+        logger.warning("Couldn't parse %s=%r as number — defaulting to 0", field, v)
+        return 0.0
+
 
 async def _run_add_cocktail(a: dict) -> dict:
     if not a.get("name") or not a.get("ingredients"):
@@ -120,7 +147,7 @@ async def _run_add_cocktail(a: dict) -> dict:
         ingredients=[
             CocktailIngredient(
                 name=i.get("name", ""),
-                amount_ml=float(i.get("amount_ml") or 0),
+                amount_ml=_coerce_float(i.get("amount_ml"), "amount_ml"),
                 notes=i.get("notes"),
             )
             for i in a.get("ingredients", [])
@@ -205,7 +232,12 @@ async def _run_set_inventory(a: dict) -> dict:
         raise ValueError("set_inventory requires `name` and `in_stock` (boolean)")
 
     name = a["name"].strip()
-    in_stock = bool(a["in_stock"])
+    raw_in_stock = a["in_stock"]
+    # Tolerate the 8B model emitting "true"/"false" as strings or yes/no.
+    if isinstance(raw_in_stock, str):
+        in_stock = raw_in_stock.strip().lower() in {"true", "yes", "y", "1", "in_stock"}
+    else:
+        in_stock = bool(raw_in_stock)
 
     # Match by name case-insensitively (regex). Upsert: if it doesn't exist yet, create it.
     existing = await db.inventory.find_one(
