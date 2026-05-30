@@ -113,12 +113,23 @@ User started asking "can you give me your source code so I can build an offline 
 - **One brain across all channels**: session_id="main" — Russell remembers what you told him on Telegram while you're standing in the kitchen.
 - Files compile cleanly; runtime test must happen on the Pi hardware itself (server doesn't have audio devices or wake-word libs).
 
+### Phase 6 (2026-02) — Free stack migration + Pi hardware validated
+- **Cloud brain switched from Claude (Emergent key) to Groq Llama 3.3 70B Versatile.** Same `/api/chat` contract — no frontend changes needed.
+- **STT switched from OpenAI Whisper to Groq Whisper Large V3.** Same `/api/voice/transcribe` contract.
+- **Pi-side TTS reverted from cloud OpenAI TTS back to local Piper** (Aussie male voice, `en_GB-alan-medium.onnx`) piped through `aplay` to bypass ALSA channel-count quirks. Zero per-request cost.
+- **Picovoice Porcupine replaced with openWakeWord** (fully free, ONNX, on-device). Currently using pre-trained `hey_jarvis` model — custom "Hey Russell" .onnx training deferred to next session.
+- **Blue Yeti / ALSA robustness**: `find_working_input_device()` in `audio_io.py` auto-scans every input device on startup. Survives the USB mic re-enumerating to a different ALSA index between reboots.
+- **Verified live on hardware (2026-05-31)**: Full pipeline working end-to-end — wake fires on "Hey Jarvis", Groq STT transcribes accurately, Llama 3.3 70B replies in-character, Piper speaks the reply through the speaker. Russell is officially alive on free infra.
+
 ## Prioritized Backlog
-### P0 (Phase 5 — Raspberry Pi)
-- [ ] Pi client: wake word (Porcupine "Hey Sheldon") → record → hit cloud Brain API → audio playback
-- [ ] systemd service for autostart
-- [ ] User has Yeti mic + Bluetooth speaker (via AUX) + NVMe SSD already; needs Pi 4 or Pi 5
-- [ ] Optional later: fully local mode (Llama 3.2 3B via Ollama, faster-whisper, Piper TTS en-AU)
+### P1 — Next up
+- [ ] **Custom "Hey Russell" wake word** — train a .onnx via openWakeWord's Google Colab notebook (~20 min of samples), drop into `/app/pi_client/keywords/`, point `WAKE_WORD_MODEL` at it.
+- [ ] **systemd autostart** — the unit file exists at `/app/pi_client/systemd/russell.service`. Need to copy into `/etc/systemd/system/` on the Pi and `systemctl enable --now russell` so it runs on boot.
+
+### P2 — Polish
+- [ ] **Service Mode UI** — bigger fonts, fewer columns, designed for the user to glance at while behind the bar.
+- [ ] **Restore deleted seeds** button in Library (currently tombstoned deletes are permanent unless you flush the `tombstones` collection).
+- [ ] Strip test-time deps from `/app/backend/requirements.txt` (got bloated by past `pip freeze` calls).
 
 ### Notes from chat
 - User's hardware on hand: Blue Yeti USB mic, Bluetooth speaker (AUX-capable), NVMe SSD.
