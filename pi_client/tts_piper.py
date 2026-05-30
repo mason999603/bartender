@@ -47,19 +47,22 @@ class PiperTTS:
                 self._warned_missing = True
             return
         cmd = self._cmd + ["--model", self.voice_path, "--output_file", wav_path]
+        # Pipe text via Popen+communicate so stdin is properly closed (signals EOF to piper).
         try:
-            subprocess.run(
+            proc = subprocess.Popen(
                 cmd,
-                input=text.encode("utf-8"),
-                check=True,
-                capture_output=True,
-                timeout=30,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
             )
-        except subprocess.CalledProcessError as e:
-            logger.warning(f"piper failed: {e.stderr.decode('utf-8', errors='ignore')[:300]}")
-            raise
+            _, stderr = proc.communicate(input=text.encode("utf-8"), timeout=60)
+            if proc.returncode != 0:
+                err = stderr.decode("utf-8", errors="ignore")[:400]
+                logger.warning(f"piper exit {proc.returncode}: {err}")
+                raise subprocess.CalledProcessError(proc.returncode, cmd, output=err)
         except subprocess.TimeoutExpired:
-            logger.warning("piper timed out after 30s")
+            proc.kill()
+            logger.warning("piper timed out after 60s")
             raise
 
 
