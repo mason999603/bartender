@@ -21,25 +21,77 @@ CHANNELS = 1
 DTYPE = "int16"
 
 
-def _pick_input_settings(input_device: Optional[int]) -> tuple[int, int]:
-    """Find a sample-rate + channel-count combo the input device supports.
+_RATE_CHANNEL_COMBOS = [
+    (TARGET_RATE, 1), (TARGET_RATE, 2),
+    (48000, 1), (48000, 2),
+    (44100, 1), (44100, 2),
+]
 
-    Returns (sample_rate, channels). USB mics vary — Yeti likes 48k stereo,
-    some cheap mics only do 16k mono. We probe.
-    """
-    for sr, ch in [
-        (TARGET_RATE, 1), (TARGET_RATE, 2),
-        (48000, 1), (48000, 2),
-        (44100, 1), (44100, 2),
-    ]:
+
+def _try_device(device: Optional[int]) -> Optional[tuple[int, int]]:
+    """Return (sample_rate, channels) if the given device accepts any combo."""
+    for sr, ch in _RATE_CHANNEL_COMBOS:
         try:
             sd.check_input_settings(
-                device=input_device, samplerate=sr, channels=ch, dtype=DTYPE
+                device=device, samplerate=sr, channels=ch, dtype=DTYPE
             )
             return sr, ch
         except Exception:
             continue
-    return 48000, 1  # last-ditch guess
+    return None
+
+
+def find_working_input_device(preferred: Optional[int]) -> tuple[Optional[int], int, int]:
+    """Resolve to a working input device.
+
+    Tries the preferred index first. If that fails (USB mic re-enumerated to a
+    different ALSA card on reboot), scans every device with max_input_channels>0
+    and returns the first one that accepts a usable rate/channel combo.
+
+    Returns (device_index, sample_rate, channels). device_index may be None,
+    which sounddevice treats as the system default input.
+    """
+    if preferred is not None:
+        got = _try_device(preferred)
+        if got is not None:
+            return preferred, got[0], got[1]
+        logger.warning(
+            "Configured input device %s doesn't accept any standard format — "
+            "scanning for another working mic…", preferred
+        )
+
+    try:
+        devices = sd.query_devices()
+    except Exception:
+        logger.exception("sd.query_devices() failed")
+        devices = []
+
+    for idx, info in enumerate(devices):
+        if info.get("max_input_channels", 0) <= 0:
+            continue
+        if idx == preferred:
+            continue  # already tried
+        got = _try_device(idx)
+        if got is not None:
+            logger.info(
+                "Auto-selected input device %d: %s (%d Hz, %d ch)",
+                idx, info.get("name", "?"), got[0], got[1],
+            )
+            return idx, got[0], got[1]
+
+    # Last-ditch: let PortAudio pick the default and hope it works.
+    got = _try_device(None)
+    if got is not None:
+        logger.info("Falling back to system default input (%d Hz, %d ch)", got[0], got[1])
+        return None, got[0], got[1]
+
+    logger.error("No input device accepts any standard sample-rate/channel combo.")
+    return preferred, 48000, 1  # caller will fail loudly when the stream opens
+
+
+def _pick_input_settings(input_device: Optional[int]) -> tuple[Optional[int], int, int]:
+    """Back-compat shim: returns (device, sample_rate, channels)."""
+    return find_working_input_device(input_device)
 
 
 def _rms(chunk: np.ndarray) -> float:
@@ -76,7 +128,7 @@ def record_until_silence(
 
     Returns a fully-formed 16kHz mono WAV file as bytes (ready to POST to /api/voice/transcribe).
     """
-    device_rate, device_channels = _pick_input_settings(input_device)
+    device_idx, device_rate, device_channels = find_working_input_device(input_device)
     chunk_ms = 30
     chunk_samples = int(device_rate * chunk_ms / 1000)
 
@@ -93,7 +145,7 @@ def record_until_silence(
         samplerate=device_rate,
         channels=device_channels,
         dtype=DTYPE,
-        device=input_device,
+        device=device_idx,
         blocksize=chunk_samples,
     ) as stream:
         # Brief pre-roll buffer so the very first syllable isn't clipped.

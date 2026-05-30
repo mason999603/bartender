@@ -30,7 +30,7 @@ from dotenv import load_dotenv
 ROOT = Path(__file__).resolve().parent
 load_dotenv(ROOT / ".env")
 
-from audio_io import record_until_silence, play_wav_file  # noqa: E402
+from audio_io import record_until_silence, play_wav_file, find_working_input_device  # noqa: E402
 from tts_piper import PiperTTS, speak  # noqa: E402
 
 logging.basicConfig(
@@ -159,33 +159,14 @@ class WakeWordListener:
         self.device_channels: int = 1
 
     def __enter__(self):
-        # Probe rate/channel combos until one is accepted. USB mics vary wildly —
-        # Yeti prefers 48kHz stereo, but cheaper mics might only do 16kHz mono.
-        last_err: Exception | None = None
-        for sr, channels in [
-            (self.SAMPLE_RATE, 1), (self.SAMPLE_RATE, 2),
-            (48000, 1), (48000, 2),
-            (44100, 1), (44100, 2),
-        ]:
-            try:
-                sd.check_input_settings(
-                    device=self.input_device,
-                    samplerate=sr,
-                    channels=channels,
-                    dtype="int16",
-                )
-                self.device_rate = sr
-                self.device_channels = channels
-                self.device_frame_len = int(sr * 0.08)
-                break
-            except Exception as e:
-                last_err = e
-                continue
-        else:
-            raise RuntimeError(
-                f"No working sample-rate/channel combo for input device {self.input_device}. "
-                f"Last error: {last_err}"
-            )
+        # Resolve input device — falls back to scanning if configured one fails.
+        # USB mics like the Blue Yeti can re-enumerate to a different ALSA index
+        # across reboots, so we don't trust the env-pinned index blindly.
+        device_idx, sr, channels = find_working_input_device(self.input_device)
+        self.input_device = device_idx
+        self.device_rate = sr
+        self.device_channels = channels
+        self.device_frame_len = int(sr * 0.08)
 
         self.stream = sd.RawInputStream(
             samplerate=self.device_rate,
@@ -250,6 +231,19 @@ def main() -> int:
 
     cfg = load_config()
     logger.info(f"Russell Pi client starting — backend={cfg.backend_url}")
+
+    # Log all visible audio devices once so we (and the user) can see what's
+    # there if mic detection goes sideways.
+    try:
+        devs = sd.query_devices()
+        input_summary = ", ".join(
+            f"#{i}:{d['name']!r}(in={d['max_input_channels']})"
+            for i, d in enumerate(devs) if d.get("max_input_channels", 0) > 0
+        )
+        logger.info(f"Audio inputs visible: [{input_summary or 'none'}]")
+        logger.info(f"Configured INPUT_DEVICE_INDEX={cfg.input_device}, OUTPUT_DEVICE_INDEX={cfg.output_device}")
+    except Exception:
+        logger.exception("Couldn't enumerate audio devices")
 
     tts = PiperTTS(cfg.piper_voice_path)
     api = RussellAPI(cfg.backend_url, cfg.session_id)
