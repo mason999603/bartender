@@ -8,6 +8,13 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY")
 CLAUDE_MODEL = "claude-sonnet-4-5-20250929"
 
+# Groq (free tier — primary brain + STT)
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "").strip()
+GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile").strip()
+GROQ_STT_MODEL = os.environ.get("GROQ_STT_MODEL", "whisper-large-v3").strip()
+# When True, prefer Groq for the LLM and STT; fall back to Emergent (Claude/OpenAI) only on error.
+USE_GROQ = bool(GROQ_API_KEY)
+
 TWILIO_ACCOUNT_SID = os.environ.get("TWILIO_ACCOUNT_SID", "")
 TWILIO_AUTH_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN", "")
 TWILIO_PHONE_NUMBER = os.environ.get("TWILIO_PHONE_NUMBER", "")

@@ -12,7 +12,7 @@ from fastapi import HTTPException
 
 from emergentintegrations.llm.chat import LlmChat, UserMessage
 
-from .config import EMERGENT_LLM_KEY, CLAUDE_MODEL
+from .config import EMERGENT_LLM_KEY, CLAUDE_MODEL, GROQ_API_KEY, GROQ_MODEL, USE_GROQ
 from .db import db
 from .models import StoredMessage
 from .actions import ACTIONS_PROMPT, parse_and_execute
@@ -203,8 +203,8 @@ async def chat_with_russell(session_id: str, user_text: str, channel: str = "web
     Returns (cleaned_reply, executed_actions). Actions are mutations Russell performed on
     user data (saving cocktails, adding to collections, etc.) — see core/actions.py.
     """
-    if not EMERGENT_LLM_KEY:
-        raise HTTPException(500, "EMERGENT_LLM_KEY not configured")
+    if not GROQ_API_KEY and not EMERGENT_LLM_KEY:
+        raise HTTPException(500, "No LLM configured — set GROQ_API_KEY or EMERGENT_LLM_KEY")
 
     # Build system prompt with live context + actions schema + per-channel addendum + real-time grounding
     system_prompt = await build_russell_system_prompt()
@@ -253,39 +253,70 @@ async def chat_with_russell(session_id: str, user_text: str, channel: str = "web
     ).sort("timestamp", -1).limit(20).to_list(20)
     recent.reverse()
 
-    chat_client = LlmChat(
-        api_key=EMERGENT_LLM_KEY,
-        session_id=session_id,
-        system_message=system_prompt,
-    ).with_model("anthropic", CLAUDE_MODEL)
+    if USE_GROQ:
+        # Free path — Groq + Llama 3.3 70B
+        from groq import AsyncGroq
+        client = AsyncGroq(api_key=GROQ_API_KEY)
+        messages: list[dict] = [{"role": "system", "content": system_prompt}]
+        for m in recent:
+            role = "assistant" if m["role"] == "russell" else "user"
+            messages.append({"role": role, "content": m["content"]})
+        messages.append({"role": "user", "content": user_text})
 
-    transcript_lines = []
-    for m in recent:
-        speaker = "User" if m["role"] == "user" else "Russell"
-        transcript_lines.append(f"{speaker}: {m['content']}")
-    transcript = "\n".join(transcript_lines)
-
-    if transcript:
-        framed = (
-            "Recent conversation so far (for context, do not repeat):\n"
-            f"{transcript}\n\n"
-            "Current message from the user:\n"
-            f"{user_text}"
-        )
-    else:
-        framed = user_text
-
-    try:
-        reply_text = await chat_client.send_message(UserMessage(text=framed))
-    except Exception as e:
-        msg = str(e).lower()
-        logger.exception("LLM error")
-        if "budget" in msg and "exceeded" in msg:
-            raise HTTPException(
-                429,
-                "Russell's tab is closed for the day, mate — Emergent LLM key budget exceeded. Top it up at Profile → Universal Key → Add Balance.",
+        try:
+            response = await client.chat.completions.create(
+                model=GROQ_MODEL,
+                messages=messages,
+                temperature=0.8,
+                max_tokens=1024,
             )
-        raise HTTPException(500, f"LLM error: {e}")
+            reply_text = response.choices[0].message.content
+        except Exception as e:
+            msg = str(e).lower()
+            logger.exception("Groq LLM error")
+            if "rate" in msg or "limit" in msg or "429" in msg:
+                raise HTTPException(
+                    429,
+                    "Russell's catching his breath, mate — Groq rate limit hit. Try again in a sec.",
+                )
+            raise HTTPException(500, f"LLM error: {e}")
+    else:
+        # Paid fallback — Claude via Emergent LLM key
+        if not EMERGENT_LLM_KEY:
+            raise HTTPException(500, "Neither GROQ_API_KEY nor EMERGENT_LLM_KEY configured")
+        chat_client = LlmChat(
+            api_key=EMERGENT_LLM_KEY,
+            session_id=session_id,
+            system_message=system_prompt,
+        ).with_model("anthropic", CLAUDE_MODEL)
+
+        transcript_lines = []
+        for m in recent:
+            speaker = "User" if m["role"] == "user" else "Russell"
+            transcript_lines.append(f"{speaker}: {m['content']}")
+        transcript = "\n".join(transcript_lines)
+
+        if transcript:
+            framed = (
+                "Recent conversation so far (for context, do not repeat):\n"
+                f"{transcript}\n\n"
+                "Current message from the user:\n"
+                f"{user_text}"
+            )
+        else:
+            framed = user_text
+
+        try:
+            reply_text = await chat_client.send_message(UserMessage(text=framed))
+        except Exception as e:
+            msg = str(e).lower()
+            logger.exception("LLM error")
+            if "budget" in msg and "exceeded" in msg:
+                raise HTTPException(
+                    429,
+                    "Russell's tab is closed for the day, mate — Emergent LLM key budget exceeded. Top it up at Profile → Universal Key → Add Balance.",
+                )
+            raise HTTPException(500, f"LLM error: {e}")
 
     reply_str = str(reply_text).strip()
 

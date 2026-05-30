@@ -1,4 +1,4 @@
-"""Voice (Whisper STT + OpenAI TTS) endpoints."""
+"""Voice (STT + TTS) endpoints — Groq Whisper for STT (free), OpenAI TTS for cloud fallback."""
 import io
 import logging
 
@@ -8,7 +8,7 @@ from pydantic import BaseModel
 
 from emergentintegrations.llm.openai import OpenAISpeechToText, OpenAITextToSpeech
 
-from core.config import EMERGENT_LLM_KEY
+from core.config import EMERGENT_LLM_KEY, GROQ_API_KEY, GROQ_STT_MODEL, USE_GROQ
 
 router = APIRouter(prefix="/voice", tags=["voice"])
 logger = logging.getLogger("russell.voice")
@@ -16,9 +16,9 @@ logger = logging.getLogger("russell.voice")
 
 @router.post("/transcribe")
 async def voice_transcribe(audio: UploadFile = File(...)):
-    """Transcribe an uploaded audio blob via OpenAI Whisper."""
-    if not EMERGENT_LLM_KEY:
-        raise HTTPException(500, "EMERGENT_LLM_KEY not configured")
+    """Transcribe an uploaded audio blob — Groq Whisper if available, else OpenAI Whisper."""
+    if not GROQ_API_KEY and not EMERGENT_LLM_KEY:
+        raise HTTPException(500, "No STT configured — set GROQ_API_KEY or EMERGENT_LLM_KEY")
 
     contents = await audio.read()
     if len(contents) > 25 * 1024 * 1024:
@@ -32,6 +32,33 @@ async def voice_transcribe(audio: UploadFile = File(...)):
         ext = "webm" if "webm" in ct else "mp4" if "mp4" in ct else "wav"
         fname = f"voice.{ext}"
 
+    prompt = "A bartender talking about cocktails, spirits, ingredients, recipes, and bar service."
+
+    if USE_GROQ:
+        # Free path — Groq hosted Whisper Large v3
+        from groq import AsyncGroq
+        client = AsyncGroq(api_key=GROQ_API_KEY)
+        try:
+            transcription = await client.audio.transcriptions.create(
+                file=(fname, contents),
+                model=GROQ_STT_MODEL,
+                language="en",
+                prompt=prompt,
+                response_format="json",
+            )
+            text = getattr(transcription, "text", None) or ""
+            return {"text": text.strip()}
+        except Exception as e:
+            msg = str(e).lower()
+            logger.exception("Groq STT error")
+            if "rate" in msg or "limit" in msg or "429" in msg:
+                raise HTTPException(429, "Groq STT rate-limited — try again in a sec.")
+            # Fall through to OpenAI Whisper if we have a key
+            if not EMERGENT_LLM_KEY:
+                raise HTTPException(500, f"Transcription failed: {e}")
+            logger.warning("Falling back to OpenAI Whisper")
+
+    # Paid fallback — OpenAI Whisper via Emergent key
     buf = io.BytesIO(contents)
     buf.name = fname
 
@@ -42,7 +69,7 @@ async def voice_transcribe(audio: UploadFile = File(...)):
             model="whisper-1",
             response_format="json",
             language="en",
-            prompt="A bartender talking about cocktails, spirits, ingredients, recipes, and bar service.",
+            prompt=prompt,
         )
     except Exception as e:
         msg = str(e).lower()
