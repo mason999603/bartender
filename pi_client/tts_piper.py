@@ -1,9 +1,10 @@
 """Piper TTS — local, offline voice for Russell.
 
-Synthesises text with `piper-tts` Python package, plays back via `aplay` (which
-handles sample-rate conversion the Pi's on-board DAC needs).
+Uses the `piper` CLI (more stable across versions than the Python API) to
+synthesize text → WAV, plays back via `aplay` which handles sample-rate
+conversion the Pi's on-board DAC needs.
 
-This is now fully offline / free — no cloud TTS calls.
+Fully offline / free — no cloud TTS calls.
 """
 from __future__ import annotations
 
@@ -11,44 +12,55 @@ import logging
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
-import wave
 from typing import Optional
 
 logger = logging.getLogger("russell.tts")
 
 
 class PiperTTS:
-    """Lazy-loaded Piper voice. One instance reused across many syntheses."""
+    """Local Piper voice via CLI. One instance reused across many syntheses."""
 
     def __init__(self, voice_path: str):
         self.voice_path = voice_path
-        self._voice = None
+        self._cmd = self._find_piper()
+        self._warned_missing = False
 
-    def _ensure_loaded(self) -> None:
-        if self._voice is not None:
-            return
-        try:
-            from piper.voice import PiperVoice
-        except ImportError as e:
-            raise RuntimeError(
-                "piper-tts not installed. `pip install piper-tts` on the Pi."
-            ) from e
-        logger.info(f"Loading Piper voice: {self.voice_path}")
-        self._voice = PiperVoice.load(self.voice_path)
+    @staticmethod
+    def _find_piper() -> list[str] | None:
+        """Locate the piper executable. Prefer the standalone binary, fall back to `python -m piper`."""
+        exe = shutil.which("piper")
+        if exe:
+            return [exe]
+        # piper-tts can be invoked as `python -m piper`
+        return [sys.executable, "-m", "piper"]
 
     def synthesize_to_wav(self, text: str, wav_path: str) -> None:
-        """Render `text` straight to a wav file on disk."""
+        """Render `text` straight to a wav file on disk via the piper CLI."""
         text = (text or "").strip()
         if not text:
             return
-        self._ensure_loaded()
-        sr = self._voice.config.sample_rate
-        with wave.open(wav_path, "wb") as wf:
-            wf.setnchannels(1)
-            wf.setsampwidth(2)
-            wf.setframerate(sr)
-            self._voice.synthesize(text, wf)
+        if not self._cmd:
+            if not self._warned_missing:
+                logger.error("piper CLI not found — `pip install piper-tts`")
+                self._warned_missing = True
+            return
+        cmd = self._cmd + ["--model", self.voice_path, "--output_file", wav_path]
+        try:
+            subprocess.run(
+                cmd,
+                input=text.encode("utf-8"),
+                check=True,
+                capture_output=True,
+                timeout=30,
+            )
+        except subprocess.CalledProcessError as e:
+            logger.warning(f"piper failed: {e.stderr.decode('utf-8', errors='ignore')[:300]}")
+            raise
+        except subprocess.TimeoutExpired:
+            logger.warning("piper timed out after 30s")
+            raise
 
 
 def speak(tts: PiperTTS, text: str, output_device: Optional[int] = None) -> None:
