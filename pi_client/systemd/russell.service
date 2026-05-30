@@ -7,9 +7,9 @@ Wants=network-online.target
 Type=simple
 User=pi
 Group=audio
-WorkingDirectory=/opt/russell
-Environment="PATH=/opt/russell/venv/bin:/usr/bin:/bin"
-ExecStart=/opt/russell/venv/bin/python /opt/russell/russell_pi_client.py
+WorkingDirectory=/opt/russell/pi_client
+Environment="PATH=/opt/russell/pi_client/venv/bin:/usr/bin:/bin"
+ExecStart=/opt/russell/pi_client/venv/bin/python /opt/russell/pi_client/russell_pi_client.py
 Restart=on-failure
 RestartSec=5
 StandardOutput=journal

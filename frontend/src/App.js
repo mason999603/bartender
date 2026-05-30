@@ -10,25 +10,28 @@ import MemoryPage from "@/pages/MemoryPage";
 import InventoryPage from "@/pages/InventoryPage";
 import PhonePage from "@/pages/PhonePage";
 import CollectionsPage from "@/pages/CollectionsPage";
+import { ServiceModeProvider } from "@/context/ServiceModeContext";
 
 function App() {
     return (
         <div className="App">
-            <BrowserRouter>
-                <Topbar />
-                <main>
-                    <Routes>
-                        <Route path="/" element={<ChatPage />} />
-                        <Route path="/cocktails" element={<CocktailsPage />} />
-                        <Route path="/tools" element={<ToolsPage />} />
-                        <Route path="/inventory" element={<InventoryPage />} />
-                        <Route path="/regulars" element={<RegularsPage />} />
-                        <Route path="/memory" element={<MemoryPage />} />
-                        <Route path="/collections" element={<CollectionsPage />} />
-                        <Route path="/phone" element={<PhonePage />} />
-                    </Routes>
-                </main>
-            </BrowserRouter>
+            <ServiceModeProvider>
+                <BrowserRouter>
+                    <Topbar />
+                    <main>
+                        <Routes>
+                            <Route path="/" element={<ChatPage />} />
+                            <Route path="/cocktails" element={<CocktailsPage />} />
+                            <Route path="/tools" element={<ToolsPage />} />
+                            <Route path="/inventory" element={<InventoryPage />} />
+                            <Route path="/regulars" element={<RegularsPage />} />
+                            <Route path="/memory" element={<MemoryPage />} />
+                            <Route path="/collections" element={<CollectionsPage />} />
+                            <Route path="/phone" element={<PhonePage />} />
+                        </Routes>
+                    </main>
+                </BrowserRouter>
+            </ServiceModeProvider>
         </div>
     );
 }

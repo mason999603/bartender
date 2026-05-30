@@ -1,6 +1,17 @@
 import React from "react";
 import { NavLink } from "react-router-dom";
-import { ChatCircleDots, BookOpen, Wrench, Users, Brain, Package, Phone, Stack } from "@phosphor-icons/react";
+import {
+    ChatCircleDots,
+    BookOpen,
+    Wrench,
+    Users,
+    Brain,
+    Package,
+    Phone,
+    Stack,
+    Coffee,
+} from "@phosphor-icons/react";
+import { useServiceMode } from "@/context/ServiceModeContext";
 
 const NAV = [
     { to: "/", label: "Chat", icon: ChatCircleDots, end: true, testid: "nav-chat" },
@@ -14,6 +25,7 @@ const NAV = [
 ];
 
 export default function Topbar() {
+    const { serviceMode, toggle } = useServiceMode();
     return (
         <header className="topbar" data-testid="topbar">
             <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between gap-6">
@@ -41,6 +53,16 @@ export default function Topbar() {
                         </NavLink>
                     ))}
                 </nav>
+
+                <button
+                    onClick={toggle}
+                    className={`service-mode-toggle ${serviceMode ? "is-on" : ""}`}
+                    title={serviceMode ? "Switch back to standard view" : "Bigger fonts for behind the bar"}
+                    data-testid="service-mode-toggle"
+                >
+                    <Coffee size={14} weight={serviceMode ? "fill" : "bold"} />
+                    {serviceMode ? "Service" : "Service mode"}
+                </button>
             </div>
 
             {/* Mobile nav */}

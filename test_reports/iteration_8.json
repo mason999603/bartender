@@ -1,0 +1,42 @@
+{
+  "summary": "Phase 8 — tombstone/restore endpoints + Service Mode toggle + Library Restore modal fully verified. Backend: 8/8 pytest cases pass (deleted-seeds GET, restore by exact name, restore-all via ['*'], 400 on empty body, count:0 on unknown name, tombstone created on seeded delete only, custom CRUD regression — no tombstone for custom deletes, /api/chat regression returns reply via Groq). Frontend: Service Mode toggle adds/removes html.service-mode and persists via localStorage 'russell.service_mode' across reload; second click clears it. Library page shows 'Restore (N)' badge only when a tombstone exists; modal opens, per-row 'restore-one-margarita' works, badge disappears after restore, tombstones cleared in DB. DB left clean (no lingering tombstones).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "CocktailsPage header", "issues": ["Subtitle still says '44 specs and counting' but list actually shows 49 cards because of a pre-existing duplicate 'Apple Pie Martini' (CUSTOM) seed. Pre-existing data quirk per spec — not a regression; consider deduping seed loader or making the count dynamic."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_phase8_restore_seeds.py",
+    "/app/test_reports/pytest/phase8_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "cocktails.py /admin/restore-seeds: when names==['*'] and the tombstone collection is empty, response is {restored: [], count: 0} silently — fine but consider returning 200 with an explicit 'nothing to restore' flag so the UI toast can be more specific (currently it just says 'Nothing restored — already in the book?').",
+    "cocktails.py /admin/restore-seeds inserts a fresh UUID and uses now_iso() for created_at on every restore. The tombstone stored deleted_at as the ORIGINAL created_at (line 115), so the resurrected recipe has a brand-new timestamp — minor, but breaks chronological ordering if you later sort by created_at.",
+    "cocktails.py route order comment on line 30-31 is correct, but ALL the /admin/* routes should ideally be on a sub-router (APIRouter(prefix='/admin')) mounted under /cocktails so the in-order matcher concern goes away permanently. Fine as-is; just defensive hygiene.",
+    "DELETE /api/cocktails/{id} on a SEEDED recipe doesn't 404-protect against deleting the LAST copy if duplicates exist (e.g., two Margaritas in DB). It deletes by id and tombstones by name — correct, but the duplicate-name data quirk means restore later will only re-create one row, which may collide with the surviving duplicate. The existing check `find_one({name, is_custom: False})` on line 63 protects against re-inserting if a copy already exists — good.",
+    "RestoreSeedsModal in CocktailsPage.jsx: line 433 condition `deletedSeeds.length <= names.length` to auto-close is awkward when names is the literal string '*' (length === 1 because '*' is a 1-char string). Currently works because the `names === '*'` short-circuit handles the star path, but worth a refactor for clarity.",
+    "ServiceModeContext is good — only nit: the localStorage write happens in the same effect that toggles the class, so SSR safety is fine. The try/catch around localStorage gracefully handles disabled storage. No issues.",
+    "Topbar service-mode-toggle button has no aria-pressed state — accessibility miss for a stateful toggle. Add aria-pressed={serviceMode} for screen readers.",
+    "CocktailsPage subtitle text '44 specs and counting' is hard-coded; will get stale as the seed list grows. Consider rendering `${cocktails.length} specs` or driving from a constant in seed_data."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_phase8_restore_seeds.py (new)"
+  ],
+  "success_rate": {
+    "backend": "100% (8/8)",
+    "frontend": "100% — Service Mode toggle + persistence + Restore (N) badge + modal restore-one flow all verified end-to-end via Playwright"
+  },
+  "test_credentials": "N/A — no auth on these endpoints (per spec).",
+  "seed_data_creation": "Test created a single TEST_RESTORE_<uuid> custom cocktail (then deleted it) and temporarily tombstoned 'Margarita' (then restored). Final state: tombstone collection empty, library back to its starting count. Verified via curl /api/cocktails/admin/deleted-seeds returning [].",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "All Phase 8 acceptance criteria green. The duplicate 'Apple Pie Martini' (and previously-noted duplicate Margarita) in the seed DB is a known pre-existing data quirk — when re-testing restore flow, use Playwright's `page.request` context (not urllib inside the script — the preview gateway 403s direct egress from inside the sandbox; page.request works). Pattern that worked: page.request.post(BASE+path, data={...}). Test file: /app/backend/tests/test_phase8_restore_seeds.py — also covers chat regression so it doubles as a sanity sweep.",
+  "rca of the issue": "N/A — no issues found."
+}

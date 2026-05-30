@@ -27,6 +27,62 @@ async def list_cocktails(search: str = "", category: str = "", tag: str = ""):
     return docs
 
 
+# NOTE: /admin/* routes are declared BEFORE /{cocktail_id} so FastAPI's
+# in-order matcher doesn't treat "admin" as a cocktail ID.
+@router.get("/admin/deleted-seeds")
+async def list_deleted_seeds():
+    """Names of seeded recipes the user has deliberately removed from their library."""
+    docs = await db.deleted_seeds.find({}, {"_id": 0}).sort("name", 1).to_list(500)
+    return docs
+
+
+@router.post("/admin/restore-seeds")
+async def restore_seeds(body: Dict[str, Any]):
+    """Resurrect one or more deleted seeded cocktails.
+
+    Body: `{"names": ["Margarita", "Mojito"]}` — pass `["*"]` to restore everything.
+    """
+    import uuid as _uuid
+    from core.models import now_iso
+    from seed_data import COCKTAILS
+
+    names = body.get("names") or []
+    if not names:
+        raise HTTPException(400, 'Provide `names: [...]` (or `["*"]` for all).')
+
+    if names == ["*"]:
+        targets = [t["name"] for t in await db.deleted_seeds.find({}, {"name": 1, "_id": 0}).to_list(500)]
+    else:
+        targets = list(names)
+
+    restored: list[str] = []
+    for name in targets:
+        spec = next((c for c in COCKTAILS if c["name"] == name), None)
+        if not spec:
+            continue
+        existing = await db.cocktails.find_one({"name": name, "is_custom": False})
+        if existing is None:
+            await db.cocktails.insert_one({
+                "id": str(_uuid.uuid4()),
+                "name": spec["name"],
+                "category": spec.get("category", "other"),
+                "glassware": spec.get("glassware", ""),
+                "garnish": spec.get("garnish", ""),
+                "method": spec.get("method", ""),
+                "ingredients": spec.get("ingredients", []),
+                "instructions": spec.get("instructions", ""),
+                "flavor_profile": spec.get("flavor_profile", []),
+                "abv_estimate": spec.get("abv_estimate", 0),
+                "tags": spec.get("tags", []),
+                "is_custom": False,
+                "created_at": now_iso(),
+            })
+        await db.deleted_seeds.delete_one({"name": name})
+        restored.append(name)
+
+    return {"restored": restored, "count": len(restored)}
+
+
 @router.get("/{cocktail_id}")
 async def get_cocktail(cocktail_id: str):
     doc = await db.cocktails.find_one({"id": cocktail_id}, {"_id": 0})

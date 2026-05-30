@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import PageHeader from "@/components/PageHeader";
-import { MagnifyingGlass, X, Plus, Flask, ArrowsLeftRight, Trash } from "@phosphor-icons/react";
+import { MagnifyingGlass, X, Plus, Flask, ArrowsLeftRight, Trash, ArrowCounterClockwise } from "@phosphor-icons/react";
 import { Toaster, toast } from "sonner";
 
 const FLAVOUR_CHIPS = [
@@ -191,6 +191,8 @@ export default function CocktailsPage() {
     const [loading, setLoading] = useState(true);
     const [showCreate, setShowCreate] = useState(false);
     const [outOfStock, setOutOfStock] = useState([]);
+    const [deletedSeeds, setDeletedSeeds] = useState([]); // [{ name, deleted_at }]
+    const [showRestore, setShowRestore] = useState(false);
 
     // Cycle chip state: undefined → include → exclude → undefined
     const toggleChip = (flavour) => {
@@ -240,7 +242,36 @@ export default function CocktailsPage() {
         api.get("/inventory").then((r) => {
             setOutOfStock((r.data || []).filter((i) => !i.in_stock).map((i) => i.name));
         });
+        api.get("/cocktails/admin/deleted-seeds").then((r) => {
+            setDeletedSeeds(r.data || []);
+        }).catch(() => { /* non-fatal */ });
     }, []);
+
+    const refreshDeletedSeeds = async () => {
+        try {
+            const r = await api.get("/cocktails/admin/deleted-seeds");
+            setDeletedSeeds(r.data || []);
+        } catch { /* noop */ }
+    };
+
+    const restoreSeeds = async (names) => {
+        // Accept both ["Name1", "Name2"] and "*" (sugar for "restore everything").
+        const body = names === "*" ? { names: ["*"] } : { names };
+        try {
+            const r = await api.post("/cocktails/admin/restore-seeds", body);
+            const n = r?.data?.count || 0;
+            if (n > 0) {
+                toast.success(`Restored ${n} ${n === 1 ? "recipe" : "recipes"}`);
+            } else {
+                toast.info("Nothing restored — already in the book?");
+            }
+            await refreshDeletedSeeds();
+            // Reload current view so the resurrected ones appear.
+            if (flavourActive) loadByFlavour(); else loadByName(search);
+        } catch (e) {
+            toast.error(e?.response?.data?.detail || "Couldn't restore that");
+        }
+    };
 
     // React to either search OR flavour state
     useEffect(() => {
@@ -272,6 +303,17 @@ export default function CocktailsPage() {
                 >
                     <Plus size={16} weight="bold" /> Add Spec
                 </button>
+                {deletedSeeds.length > 0 && (
+                    <button
+                        onClick={() => setShowRestore(true)}
+                        className="btn-ghost flex items-center gap-2 text-sm"
+                        title="Some classic recipes you removed are recoverable"
+                        data-testid="restore-seeds-btn"
+                    >
+                        <ArrowCounterClockwise size={14} weight="bold" />
+                        Restore ({deletedSeeds.length})
+                    </button>
+                )}
             </PageHeader>
 
             <div className="relative mb-4">
@@ -381,6 +423,102 @@ export default function CocktailsPage() {
                     }}
                 />
             )}
+            {showRestore && (
+                <RestoreSeedsModal
+                    seeds={deletedSeeds}
+                    onClose={() => setShowRestore(false)}
+                    onRestore={async (names) => {
+                        await restoreSeeds(names);
+                        // Close if there's nothing left to restore.
+                        if (names === "*" || deletedSeeds.length <= names.length) {
+                            setShowRestore(false);
+                        }
+                    }}
+                />
+            )}
+        </div>
+    );
+}
+
+function RestoreSeedsModal({ seeds, onClose, onRestore }) {
+    const [busy, setBusy] = useState(false);
+    const run = async (names) => {
+        setBusy(true);
+        try {
+            await onRestore(names);
+        } finally {
+            setBusy(false);
+        }
+    };
+    return (
+        <div
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 fade-in"
+            style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(8px)" }}
+            onClick={onClose}
+        >
+            <div
+                className="glass-strong rounded-2xl max-w-lg w-full max-h-[80vh] overflow-y-auto p-8 relative"
+                onClick={(e) => e.stopPropagation()}
+                data-testid="restore-seeds-modal"
+            >
+                <button
+                    onClick={onClose}
+                    className="absolute top-4 right-4 p-2 rounded-lg hover:bg-white/5"
+                    data-testid="restore-close"
+                >
+                    <X size={20} />
+                </button>
+                <h2 className="font-serif text-3xl mb-2" style={{ color: "var(--accent)" }}>
+                    Bring back deleted recipes
+                </h2>
+                <p className="text-sm mb-6" style={{ color: "var(--text-secondary)" }}>
+                    These classics were removed from your library at some point. Restore the ones you want back — your custom specs aren't affected.
+                </p>
+
+                {seeds.length === 0 ? (
+                    <div className="py-8 text-center" style={{ color: "var(--text-secondary)" }}>
+                        Nothing to restore — your library's intact.
+                    </div>
+                ) : (
+                    <>
+                        <div className="space-y-1 mb-6 max-h-[50vh] overflow-y-auto">
+                            {seeds.map((s) => (
+                                <div
+                                    key={s.name}
+                                    className="flex items-center justify-between px-3 py-2 rounded-lg hover:bg-white/5"
+                                    data-testid={`deleted-seed-row-${s.name.toLowerCase().replace(/\s+/g, "-")}`}
+                                >
+                                    <span style={{ color: "var(--text-primary)" }}>{s.name}</span>
+                                    <button
+                                        onClick={() => run([s.name])}
+                                        disabled={busy}
+                                        className="text-xs flex items-center gap-1.5 px-3 py-1.5 rounded-md hover:bg-white/5 disabled:opacity-50"
+                                        style={{ color: "var(--accent)" }}
+                                        data-testid={`restore-one-${s.name.toLowerCase().replace(/\s+/g, "-")}`}
+                                    >
+                                        <ArrowCounterClockwise size={12} weight="bold" />
+                                        Restore
+                                    </button>
+                                </div>
+                            ))}
+                        </div>
+                        <div className="flex justify-end gap-2 border-t border-white/5 pt-4">
+                            <button onClick={onClose} className="btn-ghost text-sm" disabled={busy}>
+                                Done
+                            </button>
+                            <button
+                                onClick={() => run("*")}
+                                disabled={busy}
+                                className="btn-amber text-sm"
+                                data-testid="restore-all-btn"
+                            >
+                                <ArrowCounterClockwise size={14} weight="bold" className="inline mr-2" />
+                                {busy ? "Restoring…" : `Restore all (${seeds.length})`}
+                            </button>
+                        </div>
+                    </>
+                )}
+            </div>
         </div>
     );
 }

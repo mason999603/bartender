@@ -298,3 +298,70 @@ input, textarea {
     box-shadow: 0 0 24px rgba(224, 145, 50, 0.4);
     flex-shrink: 0;
 }
+
+/* ─────────────────────────────────────────────────────────────────
+   Service Mode — bigger fonts, beefier tap targets, less clutter.
+   Activated by toggling the `service-mode` class on <html>.
+   ───────────────────────────────────────────────────────────────── */
+html.service-mode {
+    font-size: 19px; /* base bump from 16px → cascades to most rem-based sizes */
+}
+html.service-mode body {
+    letter-spacing: 0.005em;
+}
+html.service-mode .label-tiny {
+    font-size: 12px;
+    letter-spacing: 0.12em;
+}
+html.service-mode .nav-link {
+    padding: 0.7rem 1.1rem;
+    font-size: 1.05rem;
+}
+html.service-mode .input-dark {
+    font-size: 1.1rem;
+    padding: 0.95rem 1.1rem;
+}
+html.service-mode .badge {
+    font-size: 0.85rem;
+    padding: 0.35rem 0.7rem;
+}
+html.service-mode .btn-amber,
+html.service-mode .btn-ghost {
+    font-size: 1.05rem;
+    padding: 0.85rem 1.4rem;
+}
+html.service-mode .tool-card {
+    padding: 1.6rem;
+}
+html.service-mode .tool-card h3 {
+    font-size: 1.85rem;
+}
+/* Service-mode banner — subtle stripe so you remember it's on. */
+html.service-mode .topbar {
+    border-bottom: 2px solid var(--accent);
+}
+.service-mode-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.5rem 0.9rem;
+    border-radius: 999px;
+    border: 1px solid var(--border-subtle);
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 0.78rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
+}
+.service-mode-toggle:hover {
+    color: var(--text-primary);
+    background: rgba(255, 255, 255, 0.03);
+}
+.service-mode-toggle.is-on {
+    color: var(--accent);
+    border-color: var(--accent);
+    background: rgba(224, 145, 50, 0.08);
+}
+
