@@ -12,7 +12,7 @@ from fastapi import HTTPException
 
 from emergentintegrations.llm.chat import LlmChat, UserMessage
 
-from .config import EMERGENT_LLM_KEY, CLAUDE_MODEL, GROQ_API_KEY, GROQ_MODEL, USE_GROQ
+from .config import EMERGENT_LLM_KEY, CLAUDE_MODEL, GROQ_API_KEY, GROQ_MODEL, GROQ_FALLBACK_MODEL, USE_GROQ
 from .db import db
 from .models import StoredMessage
 from .actions import ACTIONS_PROMPT, parse_and_execute
@@ -98,23 +98,36 @@ async def _detect_record_mention(user_text: str) -> dict | None:
 
 
 async def build_russell_system_prompt() -> str:
-    # Pull live context: memories, regulars, inventory, custom cocktails, subs, collections
-    memories = await db.memories.find({}, {"_id": 0}).sort("created_at", -1).limit(30).to_list(30)
-    regulars = await db.regulars.find({}, {"_id": 0}).limit(30).to_list(30)
+    # Pull live context: memories, regulars, inventory, custom cocktails, subs, collections.
+    # Tight caps below — keeps the prompt under ~3K tokens so Groq's free-tier TPM doesn't bite.
+    memories = await db.memories.find({}, {"_id": 0}).sort("created_at", -1).limit(15).to_list(15)
+    regulars = await db.regulars.find({}, {"_id": 0}).limit(15).to_list(15)
     inventory_in = [i["name"] for i in await db.inventory.find({"in_stock": True}, {"_id": 0}).to_list(200)]
     inventory_out = [i["name"] for i in await db.inventory.find({"in_stock": False}, {"_id": 0}).to_list(200)]
-    custom = await db.cocktails.find({"is_custom": True}, {"_id": 0}).limit(30).to_list(30)
-    subs = await db.substitutions.find({}, {"_id": 0}).to_list(500)
+    custom = await db.cocktails.find({"is_custom": True}, {"_id": 0}).limit(15).to_list(15)
     collections = await db.collections.find({}, {"_id": 0}).limit(20).to_list(20)
+
+    # Substitutions: only inject swaps for things currently 86'd. Saves ~1500 input tokens vs the
+    # full cheat-sheet on every request. If nothing is 86'd, the block is short and harmless.
+    if inventory_out:
+        out_lower = [n.lower() for n in inventory_out]
+        relevant_subs = await db.substitutions.find(
+            {"$expr": {"$in": [{"$toLower": "$ingredient"}, out_lower]}}, {"_id": 0}
+        ).to_list(50)
+    else:
+        relevant_subs = []
 
     mem_block = "\n".join([f"  - {m['key']}: {m['value']}" for m in memories]) or "  (no saved memories yet)"
     reg_block = "\n".join([f"  - {r['name']}: likes={r.get('likes', [])}, dislikes={r.get('dislikes', [])}, favs={r.get('favourite_cocktails', [])}, notes={r.get('notes', '')}" for r in regulars]) or "  (no regulars saved yet)"
     inv_in_block = ", ".join(inventory_in) if inventory_in else "(no inventory tracked yet — assume a well-stocked bar)"
     inv_out_block = ", ".join(inventory_out) if inventory_out else "(nothing 86'd)"
     custom_block = "\n".join([f"  - {c['name']}: {', '.join(i['name'] + ' ' + str(i.get('amount_ml',0)) + 'ml' for i in c.get('ingredients', []))}" for c in custom]) or "  (no custom specs saved yet)"
-    subs_block = "\n".join(
-        [f"  - {s['ingredient']} → " + "; ".join(f"{x['name']} ({x.get('notes','')})" for x in s.get("subs", [])) for s in subs]
-    ) or "  (none on file)"
+    if relevant_subs:
+        subs_block = "\n".join(
+            [f"  - {s['ingredient']} → " + "; ".join(f"{x['name']} ({x.get('notes','')})" for x in s.get("subs", [])) for s in relevant_subs]
+        )
+    else:
+        subs_block = "  (nothing 86'd that needs subbing — use full bar freely)"
 
     # Collections — render each collection compactly. For records, include tags so
     # Russell can do mood-based reverse pairing.
@@ -187,7 +200,7 @@ CURRENT CONTEXT THE USER HAS SAVED:
 [User's custom cocktail specs]
 {custom_block}
 
-[Substitution cheat-sheet — use when an ingredient is 86'd or user asks for swaps]
+[Substitution cheat-sheet — covers ONLY ingredients currently 86'd. If user asks about a swap for something not listed, just give them your best knowledge.]
 {subs_block}
 
 [The user's personal collections — they trust you to remember these. Records include mood/genre tags in brackets — USE these for reverse pairing.]
@@ -246,16 +259,16 @@ async def chat_with_russell(session_id: str, user_text: str, channel: str = "web
             "When you give a cocktail spec, use simple line breaks and dash-bullets like '- 60ml gin' — no asterisks."
         )
 
-    # Recent history (last 20 messages) for transcript context — fetched BEFORE we persist
-    # the new user turn so the model doesn't see a duplicate "Current message" line.
+    # Recent history — keep it tight (12 msgs ≈ 6 turns) so we don't blow Groq's TPM budget.
     recent = await db.chat_messages.find(
         {"session_id": session_id}, {"_id": 0},
-    ).sort("timestamp", -1).limit(20).to_list(20)
+    ).sort("timestamp", -1).limit(12).to_list(12)
     recent.reverse()
 
     if USE_GROQ:
-        # Free path — Groq + Llama 3.3 70B
-        from groq import AsyncGroq
+        # Free path — Groq + Llama 3.3 70B (with 8B fallback when the 70B's daily/per-minute
+        # token bucket runs dry — keeps Russell alive on the free tier).
+        from groq import AsyncGroq, RateLimitError
         client = AsyncGroq(api_key=GROQ_API_KEY)
         messages: list[dict] = [{"role": "system", "content": system_prompt}]
         for m in recent:
@@ -263,22 +276,36 @@ async def chat_with_russell(session_id: str, user_text: str, channel: str = "web
             messages.append({"role": role, "content": m["content"]})
         messages.append({"role": "user", "content": user_text})
 
-        try:
-            response = await client.chat.completions.create(
-                model=GROQ_MODEL,
+        async def _call(model_name: str):
+            return await client.chat.completions.create(
+                model=model_name,
                 messages=messages,
                 temperature=0.8,
                 max_tokens=1024,
             )
+
+        try:
+            response = await _call(GROQ_MODEL)
             reply_text = response.choices[0].message.content
-        except Exception as e:
-            msg = str(e).lower()
-            logger.exception("Groq LLM error")
-            if "rate" in msg or "limit" in msg or "429" in msg:
+        except RateLimitError as primary_err:
+            logger.warning(
+                "Groq primary model %s rate-limited — falling back to %s. Detail: %s",
+                GROQ_MODEL, GROQ_FALLBACK_MODEL, primary_err,
+            )
+            try:
+                response = await _call(GROQ_FALLBACK_MODEL)
+                reply_text = response.choices[0].message.content
+            except RateLimitError:
+                logger.exception("Groq fallback model also rate-limited")
                 raise HTTPException(
                     429,
-                    "Russell's catching his breath, mate — Groq rate limit hit. Try again in a sec.",
+                    "Russell's catching his breath, mate — Groq's daily free tokens are spent. Resets at midnight UTC, or upgrade at console.groq.com/settings/billing.",
                 )
+            except Exception as e:
+                logger.exception("Groq fallback LLM error")
+                raise HTTPException(500, f"LLM fallback error: {e}")
+        except Exception as e:
+            logger.exception("Groq LLM error")
             raise HTTPException(500, f"LLM error: {e}")
     else:
         # Paid fallback — Claude via Emergent LLM key

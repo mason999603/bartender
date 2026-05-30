@@ -11,6 +11,10 @@ CLAUDE_MODEL = "claude-sonnet-4-5-20250929"
 # Groq (free tier — primary brain + STT)
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "").strip()
 GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile").strip()
+# Fallback model when the primary hits its daily/per-minute token cap. The 8B-instant
+# model has a separate, much larger free-tier quota — so Russell stays alive even
+# when the smarter 70B is throttled.
+GROQ_FALLBACK_MODEL = os.environ.get("GROQ_FALLBACK_MODEL", "llama-3.1-8b-instant").strip()
 GROQ_STT_MODEL = os.environ.get("GROQ_STT_MODEL", "whisper-large-v3").strip()
 # When True, prefer Groq for the LLM and STT; fall back to Emergent (Claude/OpenAI) only on error.
 USE_GROQ = bool(GROQ_API_KEY)
