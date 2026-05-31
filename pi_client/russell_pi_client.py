@@ -31,6 +31,7 @@ ROOT = Path(__file__).resolve().parent
 load_dotenv(ROOT / ".env")
 
 from audio_io import record_until_silence, play_wav_file, find_working_input_device  # noqa: E402
+from greetings import pick_greeting  # noqa: E402
 from tts_piper import PiperTTS, speak  # noqa: E402
 
 logging.basicConfig(
@@ -259,8 +260,12 @@ def main() -> int:
     signal.signal(signal.SIGTERM, _handle_sigint)
 
     # Warm Piper up front so the first reply isn't slow.
+    # Pick a time-of-day-appropriate greeting from the pool — feels like a
+    # half-asleep bartender getting woken up, not a robot booting.
+    greeting = pick_greeting()
+    logger.info(f"Boot greeting: {greeting!r}")
     try:
-        speak(tts, "G'day. Russell standing by.", output_device=cfg.output_device)
+        speak(tts, greeting, output_device=cfg.output_device)
     except Exception:
         logger.exception("Piper warm-up failed — continuing anyway")
 
