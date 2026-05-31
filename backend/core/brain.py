@@ -10,9 +10,12 @@ from typing import List
 
 from fastapi import HTTPException
 
-from emergentintegrations.llm.chat import LlmChat, UserMessage
-
-from .config import EMERGENT_LLM_KEY, CLAUDE_MODEL, GROQ_API_KEY, GROQ_MODEL, GROQ_FALLBACK_MODEL, USE_GROQ
+from .config import (
+    EMERGENT_LLM_KEY, CLAUDE_MODEL,
+    GROQ_API_KEY, GROQ_MODEL, GROQ_FALLBACK_MODEL, USE_GROQ,
+    OPENROUTER_API_KEY, OPENROUTER_BASE_URL, OPENROUTER_MODELS,
+    OPENROUTER_SITE_URL, OPENROUTER_APP_NAME, USE_OPENROUTER,
+)
 from .db import db
 from .models import StoredMessage
 from .actions import ACTIONS_PROMPT, parse_and_execute
@@ -216,8 +219,8 @@ async def chat_with_russell(session_id: str, user_text: str, channel: str = "web
     Returns (cleaned_reply, executed_actions). Actions are mutations Russell performed on
     user data (saving cocktails, adding to collections, etc.) — see core/actions.py.
     """
-    if not GROQ_API_KEY and not EMERGENT_LLM_KEY:
-        raise HTTPException(500, "No LLM configured — set GROQ_API_KEY or EMERGENT_LLM_KEY")
+    if not (USE_OPENROUTER or USE_GROQ or EMERGENT_LLM_KEY):
+        raise HTTPException(500, "No LLM configured — set OPENROUTER_API_KEY, GROQ_API_KEY, or EMERGENT_LLM_KEY")
 
     # Build system prompt with live context + actions schema + per-channel addendum + real-time grounding
     system_prompt = await build_russell_system_prompt()
@@ -265,85 +268,104 @@ async def chat_with_russell(session_id: str, user_text: str, channel: str = "web
     ).sort("timestamp", -1).limit(12).to_list(12)
     recent.reverse()
 
-    if USE_GROQ:
-        # Free path — Groq + Llama 3.3 70B (with 8B fallback when the 70B's daily/per-minute
-        # token bucket runs dry — keeps Russell alive on the free tier).
-        from groq import AsyncGroq, RateLimitError
-        client = AsyncGroq(api_key=GROQ_API_KEY)
-        messages: list[dict] = [{"role": "system", "content": system_prompt}]
-        for m in recent:
-            role = "assistant" if m["role"] == "russell" else "user"
-            messages.append({"role": role, "content": m["content"]})
-        messages.append({"role": "user", "content": user_text})
+    # ──────────────────────────────────────────────────────────────────
+    # LLM call chain — OpenRouter rotation → Groq 70B → Groq 8B
+    # ──────────────────────────────────────────────────────────────────
+    # Build OpenAI-style messages once; both OpenRouter and Groq accept this shape.
+    messages: list[dict] = [{"role": "system", "content": system_prompt}]
+    for m in recent:
+        role = "assistant" if m["role"] == "russell" else "user"
+        messages.append({"role": role, "content": m["content"]})
+    messages.append({"role": "user", "content": user_text})
 
-        async def _call(model_name: str):
-            return await client.chat.completions.create(
+    reply_text: str | None = None
+    last_error: Exception | None = None
+    model_used: str = ""
+
+    # 1) OpenRouter rotation — best-to-worst quality, each free model has its own daily bucket.
+    if USE_OPENROUTER and OPENROUTER_MODELS:
+        from openai import AsyncOpenAI
+        from openai import RateLimitError as OAIRateLimitError, APIStatusError
+        # HTTP headers must be ASCII — strip non-ASCII defensively (em-dashes, etc).
+        def _ascii_safe(s: str) -> str:
+            return s.encode("ascii", "ignore").decode("ascii") or "russell"
+        or_client = AsyncOpenAI(
+            api_key=OPENROUTER_API_KEY,
+            base_url=OPENROUTER_BASE_URL,
+            default_headers={
+                "HTTP-Referer": _ascii_safe(OPENROUTER_SITE_URL),
+                "X-Title": _ascii_safe(OPENROUTER_APP_NAME),
+            },
+        )
+        for model_id in OPENROUTER_MODELS:
+            try:
+                resp = await or_client.chat.completions.create(
+                    model=model_id,
+                    messages=messages,
+                    temperature=0.8,
+                    max_tokens=1024,
+                )
+                # Some free models occasionally return None choices when they hit
+                # capacity — treat that as a rotation trigger rather than success.
+                if not resp.choices or not resp.choices[0].message.content:
+                    logger.warning("OpenRouter model %s returned empty content — rotating", model_id)
+                    continue
+                reply_text = resp.choices[0].message.content
+                model_used = f"openrouter:{model_id}"
+                break
+            except (OAIRateLimitError, APIStatusError) as e:
+                # 429 (rate limit) or 402 (no credit) or 503 (capacity) → rotate.
+                status = getattr(e, "status_code", None)
+                logger.warning(
+                    "OpenRouter %s rejected (status=%s) — rotating. %s",
+                    model_id, status, str(e)[:200],
+                )
+                last_error = e
+                continue
+            except Exception as e:
+                logger.warning("OpenRouter %s unexpected error — rotating. %s", model_id, str(e)[:200])
+                last_error = e
+                continue
+
+    # 2) Groq fallback chain (70B → 8B) — only if OpenRouter chain didn't yield a reply.
+    if reply_text is None and USE_GROQ:
+        from groq import AsyncGroq, RateLimitError as GroqRateLimitError
+        groq_client = AsyncGroq(api_key=GROQ_API_KEY)
+
+        async def _groq_call(model_name: str):
+            return await groq_client.chat.completions.create(
                 model=model_name,
                 messages=messages,
                 temperature=0.8,
                 max_tokens=1024,
             )
 
-        try:
-            response = await _call(GROQ_MODEL)
-            reply_text = response.choices[0].message.content
-        except RateLimitError as primary_err:
-            logger.warning(
-                "Groq primary model %s rate-limited — falling back to %s. Detail: %s",
-                GROQ_MODEL, GROQ_FALLBACK_MODEL, primary_err,
-            )
+        for model_name in (GROQ_MODEL, GROQ_FALLBACK_MODEL):
             try:
-                response = await _call(GROQ_FALLBACK_MODEL)
-                reply_text = response.choices[0].message.content
-            except RateLimitError:
-                logger.exception("Groq fallback model also rate-limited")
-                raise HTTPException(
-                    429,
-                    "Russell's catching his breath, mate — Groq's daily free tokens are spent. Resets at midnight UTC, or upgrade at console.groq.com/settings/billing.",
-                )
+                resp = await _groq_call(model_name)
+                reply_text = resp.choices[0].message.content
+                model_used = f"groq:{model_name}"
+                logger.warning("Used Groq fallback %s after OpenRouter chain exhausted", model_name)
+                break
+            except GroqRateLimitError as e:
+                logger.warning("Groq %s rate-limited — trying next. %s", model_name, str(e)[:200])
+                last_error = e
+                continue
             except Exception as e:
-                logger.exception("Groq fallback LLM error")
-                raise HTTPException(500, f"LLM fallback error: {e}")
-        except Exception as e:
-            logger.exception("Groq LLM error")
-            raise HTTPException(500, f"LLM error: {e}")
-    else:
-        # Paid fallback — Claude via Emergent LLM key
-        if not EMERGENT_LLM_KEY:
-            raise HTTPException(500, "Neither GROQ_API_KEY nor EMERGENT_LLM_KEY configured")
-        chat_client = LlmChat(
-            api_key=EMERGENT_LLM_KEY,
-            session_id=session_id,
-            system_message=system_prompt,
-        ).with_model("anthropic", CLAUDE_MODEL)
+                logger.warning("Groq %s unexpected error. %s", model_name, str(e)[:200])
+                last_error = e
+                continue
 
-        transcript_lines = []
-        for m in recent:
-            speaker = "User" if m["role"] == "user" else "Russell"
-            transcript_lines.append(f"{speaker}: {m['content']}")
-        transcript = "\n".join(transcript_lines)
+    # 3) Everything throttled — surface a friendly 429.
+    if reply_text is None:
+        logger.error("All LLM providers exhausted. Last error: %s", last_error)
+        raise HTTPException(
+            429,
+            "Russell's catching his breath, mate — all free models are throttled right now. "
+            "Should clear in 60s. If it keeps happening, top up either OpenRouter or Groq.",
+        )
 
-        if transcript:
-            framed = (
-                "Recent conversation so far (for context, do not repeat):\n"
-                f"{transcript}\n\n"
-                "Current message from the user:\n"
-                f"{user_text}"
-            )
-        else:
-            framed = user_text
-
-        try:
-            reply_text = await chat_client.send_message(UserMessage(text=framed))
-        except Exception as e:
-            msg = str(e).lower()
-            logger.exception("LLM error")
-            if "budget" in msg and "exceeded" in msg:
-                raise HTTPException(
-                    429,
-                    "Russell's tab is closed for the day, mate — Emergent LLM key budget exceeded. Top it up at Profile → Universal Key → Add Balance.",
-                )
-            raise HTTPException(500, f"LLM error: {e}")
+    logger.info("LLM reply via %s", model_used)
 
     reply_str = str(reply_text).strip()
 

@@ -124,19 +124,30 @@ User started asking "can you give me your source code so I can build an offline 
 ### Phase 7 (2026-05-31) — Service Mode + Restore Seeds + Pi infra polish
 - **Service Mode UI toggle**: new `ServiceModeContext` provider + pill button in Topbar. Toggles `service-mode` class on `<html>`, persisted to localStorage. Bumps base font-size to 19px and scales nav/inputs/buttons/cards/badges for behind-the-bar glance-ability. Subtle amber stripe on the topbar reminds you it's on.
 - **Restore deleted seeded recipes**: two new admin endpoints — `GET /api/cocktails/admin/deleted-seeds` and `POST /api/cocktails/admin/restore-seeds` (accepts `{"names": ["Margarita"]}` or `{"names": ["*"]}` for everything). Library page shows a "Restore (N)" badge only when tombstones exist; modal lists each one with per-row + restore-all buttons.
-- **Pi systemd unit fixed**: `/app/pi_client/systemd/russell.service` paths corrected — `WorkingDirectory=/opt/russell/pi_client`, venv path inside that dir, ExecStart uses the correct script location. Ready to copy into `/etc/systemd/system/` for boot-time autostart.
+- **Pi systemd unit fixed**: `/app/pi_client/systemd/russell.service` paths corrected — `WorkingDirectory=/opt/russell/pi_client`, venv path inside that dir, ExecStart uses the correct script location. Verified on hardware — Russell now auto-starts on Pi boot.
 - **Custom wake-word infra**: new `/app/pi_client/keywords/` folder with a `.gitignore` keeping `.onnx` out of git, and a `README.md` walking through openWakeWord's Google Colab training notebook for a free custom "Hey Russell" model.
-- **Tested**: iteration 8 — 8/8 backend pytest, 100% frontend Playwright (toggle persistence, restore modal end-to-end, regressions on /api/chat and /api/cocktails CRUD).
+- **Tested**: iteration 8 — 8/8 backend pytest, 100% frontend Playwright.
+
+### Phase 8 (2026-05-31) — Multi-provider LLM rotation + action parser hardening
+- **OpenRouter is now the primary brain** with a multi-model rotation chain (deepseek-v4-flash → nvidia-nemotron-3-super-120b → moonshot-kimi-k2.6 → llama-3.3-70b → qwen3-next-80b → gemma-4-31b → gpt-oss-120b → glm-4.5-air). Each `:free` model has its own daily quota, so rotating across 8 effectively multiplies headroom. Groq 70B → 8B kept as deeper fallback when *all* OpenRouter models are throttled. Friendly 429 surfaced only when literally everything is exhausted.
+- **System prompt slimmed** (saves ~3K tokens per request): substitutions only injected for currently 86'd ingredients (was injecting all 22 every time); memories/regulars capped at 15; chat history trimmed 20 → 12 messages.
+- **Action parser hardened against dumber fallback models**:
+  - Regex now tolerates `[russell_actions>` (square-open Markdown corruption) in addition to proper `<russell_actions>` tags — the 8B-class models routinely emit the malformed version, every save was silently failing.
+  - `amount_ml` coercion handles placeholders (`"insert_amount"` → 0), strings with units (`"22.5 ml"` → 22.5), and nulls (→ 0) instead of throwing.
+  - `set_inventory.in_stock` accepts `"true"`/`"yes"`/`1` as truthy strings.
+  - Added explicit JSON-value rules to the actions system prompt forbidding placeholder strings.
+- **Live on user's Pi (2026-05-31)** — Pi voice loop now hits OpenRouter via the cloud `/api/chat` endpoint, full pipeline still on the free stack.
 
 ## Prioritized Backlog
 ### P1 — Next up
-- [ ] **Train custom "Hey Russell" wake word** via openWakeWord Colab (instructions in `/app/pi_client/keywords/README.md`) — fully on user.
-- [ ] **Install systemd autostart on the Pi**: `sudo cp /opt/russell/pi_client/systemd/russell.service /etc/systemd/system/ && sudo systemctl enable --now russell` — fully on user.
+- [ ] Train custom "Hey Russell" wake word via openWakeWord Colab (instructions in `/app/pi_client/keywords/README.md`) — fully on user.
 
 ### P2 — Polish
 - [ ] Strip test-time deps from `/app/backend/requirements.txt` (deferred — pip resolver conflict between emergentintegrations and litellm needs untangling first).
 - [ ] Dedupe duplicate seeded cocktails in the DB (pre-existing data quirk: "Margarita" and "Apple Pie Martini" appear twice).
 - [ ] Refactor `/admin/*` cocktail routes onto a sub-`APIRouter(prefix="/admin")` for tidier routing (currently relies on declaration order).
+- [ ] Add visible "Russell saved this for you" toast on the web Chat page when an action lands (closes the loop on action transparency).
+- [ ] Show currently-active LLM provider/model in a status pill (so user knows when Russell's degraded to a smaller model).
 
 ### Notes from chat
 - User's hardware on hand: Blue Yeti USB mic, Bluetooth speaker (AUX-capable), NVMe SSD.
