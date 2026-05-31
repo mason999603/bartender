@@ -37,7 +37,20 @@ from .models import (
 logger = logging.getLogger("russell.actions")
 
 ACTION_BLOCK_RE = re.compile(
-    r"<russell_actions>\s*(\[.*?\])\s*</russell_actions>",
+    # Be liberal in what we accept. The 8B fallback model has a habit of emitting
+    # `[russell_actions>` (markdown-style square open) or `[russell_actions]` instead
+    # of the proper `<russell_actions>...</russell_actions>` wrap. We accept any
+    # combo of `<` / `[` for open and `>` / `]` for close, then yank the JSON array
+    # between them. The 70B model emits the proper tags — both styles work.
+    r"[<\[]\s*russell_actions\s*[>\]]\s*(\[.*?\])\s*[<\[]\s*/\s*russell_actions\s*[>\]]",
+    re.DOTALL | re.IGNORECASE,
+)
+
+# Last-ditch fallback when even the closing tag is missing/malformed — find any
+# JSON array immediately preceded by the words "russell_actions" or "russell actions"
+# (with any bracket noise around it) and capture from there.
+ACTION_FALLBACK_RE = re.compile(
+    r"[<\[]?\s*russell_actions\s*[>\]]?\s*(\[\s*\{.*?\}\s*\])",
     re.DOTALL | re.IGNORECASE,
 )
 
@@ -280,11 +293,18 @@ _DISPATCH = {
 async def parse_and_execute(reply: str) -> tuple[str, list[dict[str, Any]]]:
     """Strip the <russell_actions> block from `reply`, run each action, return (clean_reply, executed)."""
     m = ACTION_BLOCK_RE.search(reply)
-    if not m:
-        return reply, []
-
-    raw = m.group(1)
-    cleaned = ACTION_BLOCK_RE.sub("", reply).strip()
+    if m:
+        raw = m.group(1)
+        cleaned = ACTION_BLOCK_RE.sub("", reply).strip()
+    else:
+        # Fallback regex for when only the opening tag survived — better to save a
+        # cocktail with a slightly messy reply than to drop it entirely.
+        m = ACTION_FALLBACK_RE.search(reply)
+        if not m:
+            return reply, []
+        raw = m.group(1)
+        cleaned = ACTION_FALLBACK_RE.sub("", reply).strip()
+        logger.warning("Action block matched via FALLBACK regex (malformed tags from LLM)")
 
     try:
         actions = json.loads(raw)
