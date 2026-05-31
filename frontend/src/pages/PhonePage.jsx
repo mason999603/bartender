@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { api, API } from "@/lib/api";
 import PageHeader from "@/components/PageHeader";
 import { Toaster, toast } from "sonner";
-import { Copy, Phone, ChatText, CheckCircle, Warning, TelegramLogo, ArrowSquareOut, Cpu } from "@phosphor-icons/react";
+import { Copy, Phone, ChatText, CheckCircle, Warning, TelegramLogo, ArrowSquareOut, Cpu, SpotifyLogo, MusicNote } from "@phosphor-icons/react";
 
 export default function PhonePage() {
     const [status, setStatus] = useState(null);
@@ -10,6 +10,8 @@ export default function PhonePage() {
     const [tg, setTg] = useState(null);
     const [tgLoading, setTgLoading] = useState(true);
     const [setupBusy, setSetupBusy] = useState(false);
+    const [spotify, setSpotify] = useState(null);
+    const [spotifyLoading, setSpotifyLoading] = useState(true);
 
     useEffect(() => {
         api.get("/twilio/status")
@@ -17,7 +19,41 @@ export default function PhonePage() {
             .catch(() => setStatus(null))
             .finally(() => setLoading(false));
         loadTelegram();
+        loadSpotify();
+
+        // When the OAuth popup closes via postMessage, refresh the status.
+        const onMsg = (e) => {
+            if (e?.data?.type === "spotify_connected") {
+                setTimeout(loadSpotify, 400);
+            }
+        };
+        window.addEventListener("message", onMsg);
+        return () => window.removeEventListener("message", onMsg);
     }, []);
+
+    const loadSpotify = () => {
+        setSpotifyLoading(true);
+        api.get("/spotify/status")
+            .then((r) => setSpotify(r.data))
+            .catch(() => setSpotify(null))
+            .finally(() => setSpotifyLoading(false));
+    };
+
+    const connectSpotify = async () => {
+        try {
+            const r = await api.get("/spotify/login");
+            window.open(r.data.auth_url, "_blank", "noopener,noreferrer");
+            toast.info("Authorise in the popup, then come back here.");
+        } catch (e) {
+            toast.error(e?.response?.data?.detail || "Couldn't start Spotify login");
+        }
+    };
+
+    const disconnectSpotify = async () => {
+        await api.post("/spotify/disconnect");
+        toast.success("Spotify disconnected");
+        loadSpotify();
+    };
 
     const loadTelegram = () => {
         setTgLoading(true);
@@ -118,7 +154,70 @@ export default function PhonePage() {
                 )}
             </div>
 
-            {/* Webhook URLs */}
+            {/* Spotify card */}
+            <div className="tool-card mb-8" data-testid="spotify-status-card">
+                <div className="flex items-start gap-4">
+                    <SpotifyLogo size={36} weight="fill" style={{ color: spotify?.connected ? "#1DB954" : "var(--text-secondary)" }} />
+                    <div className="flex-1 min-w-0">
+                        <div className="font-serif text-2xl mb-1" style={{ color: "var(--text-primary)" }}>
+                            Spotify
+                        </div>
+                        {spotifyLoading ? (
+                            <div className="text-sm" style={{ color: "var(--text-secondary)" }}>Checking…</div>
+                        ) : spotify?.connected ? (
+                            <>
+                                <div className="text-sm mb-3" style={{ color: "var(--text-secondary)" }}>
+                                    Connected as <strong style={{ color: "var(--text-primary)" }}>{spotify.profile?.display_name || "—"}</strong>
+                                    {spotify.profile?.is_premium ? (
+                                        <span className="ml-2 badge" style={{ color: "#1DB954", borderColor: "#1DB954" }}>Premium</span>
+                                    ) : (
+                                        <span className="ml-2 badge" style={{ color: "#FCA5A5" }}>Free tier — playback control disabled</span>
+                                    )}
+                                </div>
+                                {spotify.currently_playing ? (
+                                    <div
+                                        className="flex items-center gap-2 px-3 py-2 rounded-lg mb-3"
+                                        style={{ background: "rgba(29, 185, 84, 0.08)", border: "1px solid rgba(29, 185, 84, 0.25)" }}
+                                        data-testid="spotify-now-playing"
+                                    >
+                                        <MusicNote size={16} weight="fill" style={{ color: "#1DB954" }} />
+                                        <div className="text-sm" style={{ color: "var(--text-primary)" }}>
+                                            <strong>{spotify.currently_playing.track}</strong> — {spotify.currently_playing.artist}
+                                            {spotify.currently_playing.device && (
+                                                <span style={{ color: "var(--text-secondary)" }}> · on {spotify.currently_playing.device}</span>
+                                            )}
+                                            {!spotify.currently_playing.is_playing && (
+                                                <span style={{ color: "var(--text-secondary)" }}> · paused</span>
+                                            )}
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="text-sm mb-3" style={{ color: "var(--text-secondary)" }}>
+                                        Nothing playing right now. Open Spotify on a device and Russell can take over from there.
+                                    </div>
+                                )}
+                                <div className="flex gap-2">
+                                    <button onClick={loadSpotify} className="btn-ghost text-sm" data-testid="spotify-refresh">
+                                        Refresh
+                                    </button>
+                                    <button onClick={disconnectSpotify} className="btn-ghost text-sm" data-testid="spotify-disconnect">
+                                        Disconnect
+                                    </button>
+                                </div>
+                            </>
+                        ) : (
+                            <>
+                                <div className="text-sm mb-4" style={{ color: "var(--text-secondary)" }}>
+                                    Connect once and Russell can play music on your behalf — "Hey Russell, throw on some Marley", queue tracks, change the vibe to match what you're drinking. Premium required for playback control.
+                                </div>
+                                <button onClick={connectSpotify} className="btn-amber flex items-center gap-2" data-testid="spotify-connect-btn">
+                                    <SpotifyLogo size={16} weight="fill" /> Connect with Spotify
+                                </button>
+                            </>
+                        )}
+                    </div>
+                </div>
+            </div>
             <div className="tool-card mb-8">
                 <h3 className="font-serif text-2xl mb-4" style={{ color: "var(--accent)" }}>
                     Your webhook URLs

@@ -28,6 +28,7 @@ from routers import (  # noqa: E402
     inventory,
     memory,
     regulars,
+    spotify_routes,
     substitutions,
     telegram_routes,
     tools,
@@ -140,6 +141,7 @@ for r in (
     memory.router,
     inventory.router,
     collections.router,
+    spotify_routes.router,
     telegram_routes.router,
 ):
     api_router.include_router(r)

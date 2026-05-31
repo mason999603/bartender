@@ -102,6 +102,28 @@ ACTION TYPES YOU CAN EMIT:
    "we're out of X" or "X is back in".
    Required: `name`, `in_stock` (boolean).
 
+6. spotify_play — start playback on the user's Spotify (Premium, voice-controlled).
+   Use when the user asks you to play music. Examples:
+     "play some Marley" → {"type":"spotify_play","query":"Bob Marley","kind":"artist"}
+     "put on Kind of Blue" → {"type":"spotify_play","query":"Kind of Blue Miles Davis","kind":"album"}
+     "play Redemption Song" → {"type":"spotify_play","query":"Redemption Song Bob Marley","kind":"track"}
+     "throw on some smoky tiki music" → {"type":"spotify_play","query":"smoky dub reggae","kind":"playlist"}
+   Required: `query` (search terms).
+   Optional: `kind` (one of: track | album | artist | playlist, default "track").
+   The system will search Spotify and start playing the top match on the user's active device.
+
+7. spotify_pause / spotify_resume / spotify_next / spotify_previous — simple controls.
+   No fields required. Use when the user says "pause", "skip", "next track", "go back".
+     {"type":"spotify_pause"} / {"type":"spotify_next"} etc.
+
+8. spotify_volume — set Spotify volume.
+   Required: `percent` (integer 0-100).
+   Use for "turn it up", "quieter please", "max it". Pick a reasonable level
+   (e.g. up=80, down=30, max=100, mute=0) unless they give a specific number.
+
+9. spotify_queue — queue a track to play after the current one.
+   Required: `query`. Use when user says "queue X next", "play X after this".
+
 RULES — READ CAREFULLY:
 - ONLY emit actions when the user clearly asked you to save/add/remember/86 something,
   OR when they're sharing a finished spec and you can tell they'd want it kept.
@@ -277,12 +299,89 @@ async def _run_set_inventory(a: dict) -> dict:
     }
 
 
+async def _sp_client():
+    """Lazy import + grab a fresh spotipy client. Centralised so action runners stay tiny."""
+    from .spotify_client import get_spotify_client
+    return await get_spotify_client(db)
+
+
+async def _run_spotify_play(a: dict) -> dict:
+    from .spotify_client import search_and_play
+    query = (a.get("query") or "").strip()
+    if not query:
+        raise ValueError("spotify_play requires `query`")
+    kind = (a.get("kind") or "track").strip().lower()
+    if kind not in {"track", "album", "artist", "playlist"}:
+        kind = "track"
+    result = await search_and_play(db, query, kind)
+    return {"kind": "spotify", "action": "play", **result}
+
+
+async def _run_spotify_pause(_a: dict) -> dict:
+    sp = await _sp_client()
+    sp.pause_playback()
+    return {"kind": "spotify", "action": "pause"}
+
+
+async def _run_spotify_resume(_a: dict) -> dict:
+    sp = await _sp_client()
+    sp.start_playback()
+    return {"kind": "spotify", "action": "resume"}
+
+
+async def _run_spotify_next(_a: dict) -> dict:
+    sp = await _sp_client()
+    sp.next_track()
+    return {"kind": "spotify", "action": "next"}
+
+
+async def _run_spotify_previous(_a: dict) -> dict:
+    sp = await _sp_client()
+    sp.previous_track()
+    return {"kind": "spotify", "action": "previous"}
+
+
+async def _run_spotify_volume(a: dict) -> dict:
+    pct_raw = a.get("percent")
+    pct = int(_coerce_float(pct_raw, "percent"))
+    pct = max(0, min(100, pct))
+    sp = await _sp_client()
+    sp.volume(pct)
+    return {"kind": "spotify", "action": "volume", "percent": pct}
+
+
+async def _run_spotify_queue(a: dict) -> dict:
+    query = (a.get("query") or "").strip()
+    if not query:
+        raise ValueError("spotify_queue requires `query`")
+    sp = await _sp_client()
+    results = sp.search(q=query, type="track", limit=1)
+    items = ((results.get("tracks") or {}).get("items")) or []
+    if not items:
+        raise ValueError(f"No track matched '{query}'")
+    track = items[0]
+    sp.add_to_queue(track["uri"])
+    return {
+        "kind": "spotify",
+        "action": "queue",
+        "name": track["name"],
+        "artist": ", ".join(a["name"] for a in track.get("artists", [])),
+    }
+
+
 _DISPATCH = {
     "add_cocktail": _run_add_cocktail,
     "add_collection_item": _run_add_collection_item,
     "create_collection": _run_create_collection,
     "add_memory": _run_add_memory,
     "set_inventory": _run_set_inventory,
+    "spotify_play": _run_spotify_play,
+    "spotify_pause": _run_spotify_pause,
+    "spotify_resume": _run_spotify_resume,
+    "spotify_next": _run_spotify_next,
+    "spotify_previous": _run_spotify_previous,
+    "spotify_volume": _run_spotify_volume,
+    "spotify_queue": _run_spotify_queue,
 }
 
 
@@ -357,6 +456,16 @@ def summarize_for_channel(executed: list[dict[str, Any]]) -> str:
         elif kind == "inventory":
             state = "86'd" if not result.get("in_stock") else "back in stock"
             saved_bits.append(f"{result.get('name')} {state}")
+        elif kind == "spotify":
+            act = result.get("action", "")
+            if act == "play":
+                saved_bits.append(f"♪ playing {result.get('name', '?')}")
+            elif act == "queue":
+                saved_bits.append(f"♪ queued {result.get('name', '?')}")
+            elif act == "volume":
+                saved_bits.append(f"♪ volume {result.get('percent')}%")
+            else:
+                saved_bits.append(f"♪ {act}")
     if not saved_bits:
         return ""
     return "  [saved: " + "; ".join(saved_bits) + "]"

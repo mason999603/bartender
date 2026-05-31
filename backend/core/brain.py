@@ -110,6 +110,17 @@ async def build_russell_system_prompt() -> str:
     custom = await db.cocktails.find({"is_custom": True}, {"_id": 0}).limit(15).to_list(15)
     collections = await db.collections.find({}, {"_id": 0}).limit(20).to_list(20)
 
+    # Spotify live state — non-fatal, just adds mood context when something's playing.
+    spotify_now = None
+    spotify_connected = False
+    try:
+        from .spotify_client import is_connected as sp_is_connected, get_currently_playing as sp_now
+        spotify_connected = await sp_is_connected(db)
+        if spotify_connected:
+            spotify_now = await sp_now(db)
+    except Exception:
+        logger.exception("Spotify status fetch failed (non-fatal)")
+
     # Substitutions: only inject swaps for things currently 86'd. Saves ~1500 input tokens vs the
     # full cheat-sheet on every request. If nothing is 86'd, the block is short and harmless.
     if inventory_out:
@@ -155,6 +166,20 @@ async def build_russell_system_prompt() -> str:
         col_block = "\n".join(col_lines)
     else:
         col_block = "  (no personal collections saved yet)"
+
+    # Spotify block — only included when something useful to say about it.
+    if spotify_connected:
+        if spotify_now:
+            playing_state = "currently playing" if spotify_now.get("is_playing") else "paused"
+            spotify_block = (
+                f"  - Spotify {playing_state}: \"{spotify_now['track']}\" by {spotify_now['artist']}"
+                + (f" (from {spotify_now['album']})" if spotify_now.get('album') else "")
+                + (f" on {spotify_now['device']}" if spotify_now.get('device') else "")
+            )
+        else:
+            spotify_block = "  - Spotify is connected but nothing's playing right now."
+    else:
+        spotify_block = ""
 
     return f"""You are RUSSELL — a witty, dry, down-to-earth young Australian. Real bloke energy: confident without being arrogant, quick with a one-liner, never robotic. You speak with subtle Aussie warmth (occasional "mate", "reckon", "no worries", "fair dinkum") but you DON'T overdo it or sound like a parody.
 
@@ -208,6 +233,9 @@ CURRENT CONTEXT THE USER HAS SAVED:
 
 [The user's personal collections — they trust you to remember these. Records include mood/genre tags in brackets — USE these for reverse pairing.]
 {col_block}
+
+[Spotify — LIVE state. When something is playing, USE it for mood pairing (cocktail → music context the same as records). You can also control Spotify via actions — see the actions section below for `spotify_play`, `spotify_pause`, etc.]
+{spotify_block or "  (Spotify not connected — user can connect it from the Phone page)"}
 
 Reference these naturally when relevant. Don't recite them verbatim — use them like a real mate remembering what's going on.
 """
