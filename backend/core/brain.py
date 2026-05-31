@@ -285,7 +285,7 @@ async def chat_with_russell(session_id: str, user_text: str, channel: str = "web
     # 1) OpenRouter rotation — best-to-worst quality, each free model has its own daily bucket.
     if USE_OPENROUTER and OPENROUTER_MODELS:
         from openai import AsyncOpenAI
-        from openai import RateLimitError as OAIRateLimitError, APIStatusError
+        from openai import RateLimitError as OAIRateLimitError, APIStatusError, APITimeoutError
         # HTTP headers must be ASCII — strip non-ASCII defensively (em-dashes, etc).
         def _ascii_safe(s: str) -> str:
             return s.encode("ascii", "ignore").decode("ascii") or "russell"
@@ -296,6 +296,9 @@ async def chat_with_russell(session_id: str, user_text: str, channel: str = "web
                 "HTTP-Referer": _ascii_safe(OPENROUTER_SITE_URL),
                 "X-Title": _ascii_safe(OPENROUTER_APP_NAME),
             },
+            # Per-model attempt timeout. Don't let a slow model hold up the whole rotation.
+            timeout=20.0,
+            max_retries=0,
         )
         for model_id in OPENROUTER_MODELS:
             try:
@@ -313,8 +316,8 @@ async def chat_with_russell(session_id: str, user_text: str, channel: str = "web
                 reply_text = resp.choices[0].message.content
                 model_used = f"openrouter:{model_id}"
                 break
-            except (OAIRateLimitError, APIStatusError) as e:
-                # 429 (rate limit) or 402 (no credit) or 503 (capacity) → rotate.
+            except (OAIRateLimitError, APIStatusError, APITimeoutError) as e:
+                # 429 (rate limit) / 402 (no credit) / 503 (capacity) / timeout → rotate.
                 status = getattr(e, "status_code", None)
                 logger.warning(
                     "OpenRouter %s rejected (status=%s) — rotating. %s",

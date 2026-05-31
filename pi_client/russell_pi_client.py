@@ -111,7 +111,10 @@ class RussellAPI:
 
     def chat(self, text: str) -> str:
         payload = {"session_id": self.session_id, "message": text}
-        r = requests.post(f"{self.base}/api/chat", json=payload, timeout=60)
+        # Generous 3-min timeout: the backend's OpenRouter chain rotates through up
+        # to 8 free models when the top ones are throttled. Each attempt can take
+        # a few seconds. Better to wait than to drop the conversation mid-flight.
+        r = requests.post(f"{self.base}/api/chat", json=payload, timeout=180)
         r.raise_for_status()
         return (r.json().get("reply") or "").strip()
 
