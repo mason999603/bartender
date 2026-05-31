@@ -1,6 +1,3 @@
-# Custom openWakeWord models go here.
-# See keywords/README.md for the Google Colab training walkthrough.
-# Drop your .onnx file in this directory then update WAKE_WORD_MODEL in .env.
-*.onnx
-*.tflite
-!.gitkeep
+# Allow committed .onnx models in this folder (small, ~200KB each).
+# Add any throwaway test models to .gitignore manually.
+!hey_russell.onnx
