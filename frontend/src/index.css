@@ -490,3 +490,39 @@ body {
     }
 }
 
+/* ─────────────────────────────────────────────────────────────────
+   Keyboard-open state — set by /lib/keyboardViewport.js.
+   When the mobile keyboard is up, tuck the bottom nav out of the way
+   so the chat composer isn't crushed. Also install banner hides.
+   ───────────────────────────────────────────────────────────────── */
+html.keyboard-open .bottom-nav,
+html.keyboard-open [data-testid="ios-install-banner"] {
+    display: none !important;
+}
+@media (max-width: 767px) {
+    html.keyboard-open main {
+        /* Drop the reserved-for-bottom-nav space since the nav is hidden */
+        padding-bottom: 8px !important;
+    }
+}
+
+/* Slimmer chat composer on phones — less padding, smaller icons */
+@media (max-width: 767px) {
+    [data-testid="chat-composer"] {
+        padding: 0.5rem !important;
+        border-radius: 1rem;
+    }
+    [data-testid="chat-composer"] textarea {
+        padding: 0.5rem 0.65rem !important;
+        line-height: 1.35;
+    }
+    [data-testid="chat-composer"] .btn-amber {
+        padding: 0.6rem 0.85rem;
+    }
+    /* Trim the secondary row (voice + hint) on phone */
+    [data-testid="chat-composer"] .flex.items-center.justify-between.gap-2.mt-2 {
+        margin-top: 0.35rem;
+    }
+}
+
+

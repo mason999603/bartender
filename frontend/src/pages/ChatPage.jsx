@@ -200,7 +200,7 @@ export default function ChatPage() {
             )}
 
             {/* Composer */}
-            <div className="sticky bottom-4 mt-4 glass rounded-2xl p-3 relative" data-testid="chat-composer">
+            <div className="sticky bottom-4 md:bottom-4 mt-4 glass rounded-2xl p-3 md:p-3 relative" data-testid="chat-composer">
                 <div className="flex items-end gap-2">
                     <textarea
                         value={input}
@@ -221,6 +221,7 @@ export default function ChatPage() {
                         onClick={() => send()}
                         disabled={!input.trim() || sending}
                         className="btn-amber flex items-center gap-2"
+                        aria-label="Send"
                         data-testid="chat-send-btn"
                     >
                         <PaperPlaneRight size={16} weight="bold" />
