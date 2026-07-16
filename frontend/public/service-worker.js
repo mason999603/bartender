@@ -1,9 +1,9 @@
 // Russell PWA service worker — minimal offline shell.
-// We keep the caching strategy conservative: cache the app shell aggressively,
-// but always go network-first for API calls (a stale reply from Russell is worse
-// than a "you're offline" toast).
+// Strategy: cache-bust on activate, network-first for everything, cache as fallback
+// so the app still opens offline. Assets like JS/CSS are always freshly fetched when
+// online so pushing a new build never leaves users stuck on old code.
 
-const CACHE = "russell-shell-v1";
+const CACHE = "russell-shell-v3";
 const SHELL = [
     "/",
     "/manifest.json",
@@ -41,13 +41,17 @@ self.addEventListener("fetch", (event) => {
         return;
     }
 
-    // Same-origin GET: network-first with cache fallback.
+    // Same-origin GET: network-first, cache as fallback. This means new JS/CSS
+    // deploys are picked up immediately when online, but the app still opens offline.
     if (url.origin === self.location.origin) {
         event.respondWith(
             fetch(request)
                 .then((response) => {
-                    const copy = response.clone();
-                    caches.open(CACHE).then((c) => c.put(request, copy)).catch(() => { });
+                    // Only cache successful full responses.
+                    if (response && response.ok && response.status === 200) {
+                        const copy = response.clone();
+                        caches.open(CACHE).then((c) => c.put(request, copy)).catch(() => { });
+                    }
                     return response;
                 })
                 .catch(() => caches.match(request).then((r) => r || caches.match("/")))

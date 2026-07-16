@@ -517,6 +517,22 @@ html.keyboard-open .bottom-nav,
 html.keyboard-open [data-testid="ios-install-banner"] {
     display: none !important;
 }
+
+/* CSS-only fallback: any time a text input inside the composer is focused,
+   hide the bottom nav. Works even if the JS visualViewport listener never
+   fires (some PWA edge cases). Requires :has() — iOS 16.4+, Chrome 105+. */
+@media (max-width: 767px) {
+    body:has([data-testid="chat-input"]:focus) .bottom-nav,
+    body:has([data-testid="chat-input"]:focus) [data-testid="ios-install-banner"],
+    body:has(input:focus) .bottom-nav,
+    body:has(textarea:focus) .bottom-nav {
+        display: none !important;
+    }
+    body:has(input:focus) main,
+    body:has(textarea:focus) main {
+        padding-bottom: 8px !important;
+    }
+}
 @media (max-width: 767px) {
     html.keyboard-open main {
         /* Drop the reserved-for-bottom-nav space since the nav is hidden */
