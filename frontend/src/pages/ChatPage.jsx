@@ -110,7 +110,7 @@ export default function ChatPage() {
     };
 
     return (
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 py-6 flex flex-col" style={{ minHeight: "calc(100vh - 80px)" }}>
+        <div className="max-w-4xl mx-auto px-4 sm:px-6 py-6 flex flex-col chat-page-root" style={{ minHeight: "calc(100vh - 80px)" }}>
             <Toaster position="top-center" theme="dark" />
 
             {/* Hero / empty state */}

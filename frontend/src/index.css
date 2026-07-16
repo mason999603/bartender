@@ -532,11 +532,25 @@ html.keyboard-open [data-testid="ios-install-banner"] {
     body:has(textarea:focus) main {
         padding-bottom: 8px !important;
     }
+    /* Also collapse the chat page's own min-height reservation so the
+       composer sits flush against the top of the keyboard, not floating
+       with dead space below. */
+    body:has(textarea:focus) .chat-page-root,
+    body:has(input:focus) .chat-page-root {
+        min-height: 0 !important;
+    }
 }
 @media (max-width: 767px) {
+    html.keyboard-open .bottom-nav,
+    html.keyboard-open [data-testid="ios-install-banner"] {
+        display: none !important;
+    }
     html.keyboard-open main {
         /* Drop the reserved-for-bottom-nav space since the nav is hidden */
         padding-bottom: 8px !important;
+    }
+    html.keyboard-open .chat-page-root {
+        min-height: 0 !important;
     }
 }
 
