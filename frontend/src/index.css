@@ -367,6 +367,24 @@ html.service-mode .topbar {
 
 
 /* ─────────────────────────────────────────────────────────────────
+   Kill horizontal scroll everywhere — nothing on Russell should scroll
+   sideways. If a message bubble or code block has a huge token/URL,
+   break it inside the bubble rather than pushing the page wider.
+   ───────────────────────────────────────────────────────────────── */
+html,
+body,
+#root,
+main {
+    overflow-x: hidden;
+    max-width: 100vw;
+}
+.bubble-user,
+.bubble-russell {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+
+/* ─────────────────────────────────────────────────────────────────
    PWA / mobile-first UX
    ───────────────────────────────────────────────────────────────── */
 
