@@ -2,6 +2,7 @@ import React from "react";
 import "@/App.css";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import Topbar from "@/components/Topbar";
+import InstallBanner from "@/components/InstallBanner";
 import ChatPage from "@/pages/ChatPage";
 import CocktailsPage from "@/pages/CocktailsPage";
 import ToolsPage from "@/pages/ToolsPage";
@@ -30,6 +31,7 @@ function App() {
                             <Route path="/phone" element={<PhonePage />} />
                         </Routes>
                     </main>
+                    <InstallBanner />
                 </BrowserRouter>
             </ServiceModeProvider>
         </div>

@@ -365,3 +365,128 @@ html.service-mode .topbar {
     background: rgba(224, 145, 50, 0.08);
 }
 
+
+/* ─────────────────────────────────────────────────────────────────
+   PWA / mobile-first UX
+   ───────────────────────────────────────────────────────────────── */
+
+/* iOS safe-area — respect the notch and home-indicator so nothing gets clipped
+   when installed as a Home Screen app. */
+body {
+    padding-top: env(safe-area-inset-top);
+}
+
+/* Push page content above the fixed bottom nav on mobile. */
+@media (max-width: 767px) {
+    main {
+        padding-bottom: calc(72px + env(safe-area-inset-bottom));
+    }
+}
+
+/* Bottom tab bar — the "app" feel on phones */
+.bottom-nav {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 30;
+    display: flex;
+    align-items: stretch;
+    justify-content: space-around;
+    background: rgba(13, 10, 8, 0.92);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    border-top: 1px solid var(--border-subtle);
+    padding: 0.35rem 0 calc(0.35rem + env(safe-area-inset-bottom));
+}
+.bottom-tab {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.15rem;
+    padding: 0.4rem 0.25rem;
+    color: var(--text-secondary);
+    font-size: 0.68rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    transition: color 120ms ease;
+    -webkit-tap-highlight-color: transparent;
+}
+.bottom-tab.active,
+.bottom-tab:active {
+    color: var(--accent);
+}
+.bottom-tab span {
+    line-height: 1;
+}
+
+/* Mobile-first tweaks to the top bar. Keep it slim on phones. */
+@media (max-width: 767px) {
+    .topbar {
+        position: sticky;
+        top: 0;
+        z-index: 20;
+        background: rgba(13, 10, 8, 0.9);
+        backdrop-filter: blur(14px);
+        -webkit-backdrop-filter: blur(14px);
+    }
+    .brand-mark {
+        width: 30px;
+        height: 30px;
+    }
+    .service-mode-toggle {
+        padding: 0.4rem 0.55rem;
+        font-size: 0;   /* icon-only on phone; label re-appears via .hidden.sm:inline */
+    }
+    .service-mode-toggle.is-on,
+    .service-mode-toggle {
+        gap: 0;
+    }
+}
+
+/* PageHeader compaction on phones — more room for actual content */
+@media (max-width: 767px) {
+    .page-header h1 {
+        font-size: 2.25rem !important;
+        line-height: 1.1;
+    }
+    .page-header p {
+        font-size: 0.95rem;
+    }
+}
+
+/* Phone-optimised cocktail grid — one column below 480px, two columns 480–767 */
+@media (max-width: 767px) {
+    .cocktail-grid {
+        grid-template-columns: repeat(1, minmax(0, 1fr));
+        gap: 0.75rem;
+    }
+}
+@media (min-width: 480px) and (max-width: 767px) {
+    .cocktail-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+/* Bigger tap targets on cards so it feels like an app not a website */
+@media (max-width: 767px) {
+    .cocktail-card {
+        padding: 1.1rem !important;
+    }
+    .cocktail-card .cocktail-title {
+        font-size: 1.35rem !important;
+    }
+}
+
+/* Kill iOS input auto-zoom on focus by ensuring font-size >= 16px */
+@media (max-width: 767px) {
+    input, textarea, select, .input-dark {
+        font-size: 16px !important;
+    }
+}
+

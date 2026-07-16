@@ -2,7 +2,7 @@ import React from "react";
 
 export default function PageHeader({ eyebrow, title, subtitle, children }) {
     return (
-        <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 mb-8 fade-in">
+        <div className="page-header flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 mb-8 fade-in">
             <div>
                 {eyebrow && <div className="label-tiny mb-2">{eyebrow}</div>}
                 <h1

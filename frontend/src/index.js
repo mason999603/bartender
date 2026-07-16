@@ -21,3 +21,12 @@ root.render(
     </QueryClientProvider>
   </React.StrictMode>,
 );
+
+// Register the PWA service worker. Only in prod-like builds (dev server also fine).
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker
+      .register("/service-worker.js")
+      .catch((err) => console.warn("SW registration failed:", err));
+  });
+}

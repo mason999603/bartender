@@ -377,16 +377,16 @@ export default function CocktailsPage() {
                     {flavourActive ? "No drinks match those flavours. Try loosening up." : "No drinks match. Try a different search."}
                 </div>
             ) : (
-                <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
+                <div className="grid cocktail-grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
                     {cocktails.map((c) => (
                         <button
                             key={c.id}
                             onClick={() => setSelected(c)}
-                            className="tool-card text-left"
+                            className="tool-card cocktail-card text-left"
                             data-testid={`cocktail-card-${c.name.toLowerCase().replace(/\s+/g, "-")}`}
                         >
                             <div className="flex items-start justify-between gap-3 mb-3">
-                                <h3 className="font-serif text-2xl" style={{ color: "var(--text-primary)" }}>
+                                <h3 className="font-serif text-2xl cocktail-title" style={{ color: "var(--text-primary)" }}>
                                     {c.name}
                                 </h3>
                                 {c.is_custom && <span className="badge badge-amber">Custom</span>}

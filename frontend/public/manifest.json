@@ -1,0 +1,38 @@
+{
+    "short_name": "Russell",
+    "name": "Russell — AI Bartender",
+    "description": "Your AI bartender mate — cocktails, memory, and voice on tap.",
+    "icons": [
+        {
+            "src": "/icon-192.png",
+            "type": "image/png",
+            "sizes": "192x192",
+            "purpose": "any maskable"
+        },
+        {
+            "src": "/icon-512.png",
+            "type": "image/png",
+            "sizes": "512x512",
+            "purpose": "any maskable"
+        }
+    ],
+    "start_url": "/",
+    "scope": "/",
+    "display": "standalone",
+    "orientation": "portrait-primary",
+    "theme_color": "#0d0a08",
+    "background_color": "#0d0a08",
+    "categories": ["food", "utilities", "lifestyle"],
+    "shortcuts": [
+        {
+            "name": "Chat",
+            "url": "/",
+            "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+        },
+        {
+            "name": "Cocktail Library",
+            "url": "/cocktails",
+            "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+        }
+    ]
+}
