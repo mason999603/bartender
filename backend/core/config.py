@@ -6,7 +6,8 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY")
-CLAUDE_MODEL = "claude-sonnet-4-5-20250929"
+# Anthropic Claude Sonnet 4.6 — latest recommended chat model via Emergent universal key.
+CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-6").strip()
 
 # Groq (free tier — secondary/fallback brain + STT)
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "").strip()

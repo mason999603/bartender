@@ -32,7 +32,12 @@ load_dotenv(ROOT / ".env")
 
 from audio_io import record_until_silence, play_wav_file, find_working_input_device  # noqa: E402
 from greetings import pick_greeting  # noqa: E402
-from tts_piper import PiperTTS, speak  # noqa: E402
+# TTS backend: default 'cloud' (OpenAI TTS via backend), 'piper' for legacy offline mode.
+_TTS_BACKEND = (os.environ.get("TTS_BACKEND") or "cloud").strip().lower()
+if _TTS_BACKEND == "piper":
+    from tts_piper import PiperTTS as TTSClient, speak  # noqa: E402
+else:
+    from tts_cloud import CloudTTS as TTSClient, speak  # noqa: E402
 
 logging.basicConfig(
     level=logging.INFO,
@@ -85,7 +90,7 @@ def load_config() -> Config:
     missing: list[str] = []
     if not c.backend_url:
         missing.append("RUSSELL_BACKEND_URL")
-    if not Path(c.piper_voice_path).expanduser().exists():
+    if _TTS_BACKEND == "piper" and not Path(c.piper_voice_path).expanduser().exists():
         missing.append(f"PIPER_VOICE_PATH (file not found: {c.piper_voice_path})")
     if missing:
         logger.error("Config problems — fix /app/pi_client/.env then restart:")
@@ -249,7 +254,13 @@ def main() -> int:
     except Exception:
         logger.exception("Couldn't enumerate audio devices")
 
-    tts = PiperTTS(cfg.piper_voice_path)
+    # Pick TTS backend based on env: cloud (OpenAI TTS via Emergent) or piper (offline).
+    if _TTS_BACKEND == "piper":
+        tts = TTSClient(cfg.piper_voice_path)
+        logger.info("TTS backend: piper (offline)")
+    else:
+        tts = TTSClient(cfg.backend_url, voice=os.environ.get("CLOUD_TTS_VOICE", "onyx"))
+        logger.info(f"TTS backend: cloud (voice={os.environ.get('CLOUD_TTS_VOICE', 'onyx')})")
     api = RussellAPI(cfg.backend_url, cfg.session_id)
 
     # Graceful shutdown
@@ -262,7 +273,7 @@ def main() -> int:
     signal.signal(signal.SIGINT, _handle_sigint)
     signal.signal(signal.SIGTERM, _handle_sigint)
 
-    # Warm Piper up front so the first reply isn't slow.
+    # Warm the TTS pipeline up front so the first reply isn't slow.
     # Pick a time-of-day-appropriate greeting from the pool — feels like a
     # half-asleep bartender getting woken up, not a robot booting.
     greeting = pick_greeting()
@@ -270,7 +281,7 @@ def main() -> int:
     try:
         speak(tts, greeting, output_device=cfg.output_device)
     except Exception:
-        logger.exception("Piper warm-up failed — continuing anyway")
+        logger.exception("TTS warm-up failed — continuing anyway")
 
     while not stop_flag["stop"]:
         try:
