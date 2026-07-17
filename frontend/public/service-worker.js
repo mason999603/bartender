@@ -3,7 +3,7 @@
 // so the app still opens offline. Assets like JS/CSS are always freshly fetched when
 // online so pushing a new build never leaves users stuck on old code.
 
-const CACHE = "russell-shell-v4";
+const CACHE = "russell-shell-v5";
 const SHELL = [
     "/",
     "/manifest.json",

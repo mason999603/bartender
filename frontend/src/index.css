@@ -399,6 +399,10 @@ body {
     main {
         padding-bottom: calc(72px + env(safe-area-inset-bottom));
     }
+    /* Chat page manages its own vertical layout with 100dvh — don't add nav padding. */
+    body:has(.chat-shell) main {
+        padding-bottom: 0;
+    }
 }
 
 /* Bottom tab bar — the "app" feel on phones */
@@ -572,5 +576,31 @@ html.keyboard-open [data-testid="ios-install-banner"] {
         margin-top: 0.35rem;
     }
 }
+
+/* ─────────────────────────────────────────────────────────────────
+   Chat page — full-viewport layout with fixed composer at the bottom.
+   Uses dvh (dynamic viewport height) so it shrinks automatically when
+   the mobile keyboard opens, no extra JS needed. The messages area
+   scrolls independently between the header and the composer.
+   ───────────────────────────────────────────────────────────────── */
+.chat-shell {
+    height: calc(100dvh - 80px);   /* 80px = topbar height */
+}
+@media (max-width: 767px) {
+    .chat-shell {
+        height: calc(100dvh - 64px);  /* smaller topbar on phones */
+    }
+}
+.chat-shell .chat-composer {
+    flex-shrink: 0;
+    margin: 0.5rem 0.75rem;
+    border-radius: 1rem;
+}
+@media (min-width: 768px) {
+    .chat-shell .chat-composer {
+        margin: 0.75rem 1.5rem 1rem;
+    }
+}
+
 
 
