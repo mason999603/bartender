@@ -25,9 +25,13 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 
 logger = logging.getLogger("russell.youtube")
 
-# We only ever upload videos on the user's behalf. This scope is the tightest
-# possible for that job (no read, no delete, no comment).
-YOUTUBE_SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
+# We upload videos and read channel info (channel_id/title/thumbnail for the UI).
+# Both scopes together are still lightweight and don't require Google verification
+# because neither is classified as "sensitive" or "restricted".
+YOUTUBE_SCOPES = [
+    "https://www.googleapis.com/auth/youtube.upload",
+    "https://www.googleapis.com/auth/youtube.readonly",
+]
 
 YOUTUBE_CLIENT_ID = os.environ.get("YOUTUBE_CLIENT_ID", "").strip()
 YOUTUBE_CLIENT_SECRET = os.environ.get("YOUTUBE_CLIENT_SECRET", "").strip()
@@ -90,19 +94,28 @@ async def exchange_code_for_tokens(
         )
 
     # Get channel identity so we can show which channel is connected.
-    youtube = build("youtube", "v3", credentials=creds, cache_discovery=False)
-    resp = youtube.channels().list(part="id,snippet", mine=True).execute()
-    items = resp.get("items") or []
-    if not items:
-        raise RuntimeError("The Google account you authorised has no YouTube channel.")
-    ch = items[0]
+    # Best-effort: if the user only granted upload scope, this will 403 —
+    # save the token anyway and mark channel as unknown.
+    channel_id = channel_title = channel_thumbnail = None
+    try:
+        youtube = build("youtube", "v3", credentials=creds, cache_discovery=False)
+        resp = youtube.channels().list(part="id,snippet", mine=True).execute()
+        items = resp.get("items") or []
+        if items:
+            ch = items[0]
+            channel_id = ch["id"]
+            channel_title = ch["snippet"].get("title")
+            channel_thumbnail = ((ch["snippet"].get("thumbnails") or {}).get("default") or {}).get("url")
+    except Exception:
+        logger.exception("channels().list failed — saving token without channel details")
+
     doc = {
         "_id": "primary",
         "refresh_token": creds.refresh_token,
         "scope": " ".join(YOUTUBE_SCOPES),
-        "channel_id": ch["id"],
-        "channel_title": ch["snippet"]["title"],
-        "channel_thumbnail": ((ch["snippet"].get("thumbnails") or {}).get("default") or {}).get("url"),
+        "channel_id": channel_id,
+        "channel_title": channel_title or "Your YouTube channel",
+        "channel_thumbnail": channel_thumbnail,
     }
     await db.youtube_auth.replace_one({"_id": "primary"}, doc, upsert=True)
     return doc
