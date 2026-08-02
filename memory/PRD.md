@@ -160,12 +160,21 @@ User started asking "can you give me your source code so I can build an offline 
 - **Frontend `/app/frontend/src/pages/StudioPage.jsx`**: 4-step flow — Topic → Ideas → Script (per platform, with vault save/load/delete) → Voiceover playback (Step 3) → Video Production (Step 4: Sora hero, save voiceover, optional outro card, assemble MP4 with caption).
 - **Tested (iteration_9 + iteration_10)**: 100% backend + 100% frontend. Sora 4s portrait render ~60s; ffmpeg assembly ~5-10s.
 
+### Phase 11 (2026-02) — YouTube auto-publish
+- **New router `/app/backend/routers/youtube_routes.py`** + **client `/app/backend/core/youtube_client.py`** (mirrors the Spotify OAuth pattern used elsewhere).
+- **Endpoints**: `GET /api/youtube/login`, `GET /api/youtube/callback`, `GET /api/youtube/status`, `POST /api/youtube/disconnect`, `POST /api/youtube/publish` (async job), `GET /api/youtube/publish/{id}`, `GET /api/youtube/publish` (list).
+- **Auth**: Google OAuth 2.0 web-app flow, `youtube.upload` scope only. Refresh token persisted in Mongo `youtube_auth` (`_id="primary"`).
+- **Publish flow**: takes a `final_*.mp4` filename from the studio media dir, streams via `MediaFileUpload` in 8MB resumable chunks, sets `snippet.title` (with auto `#Shorts` suffix if missing), `description`, `tags` (deduped, ≤12), `categoryId=22` (People & Blogs), `privacyStatus=public`. Progress logged every ~10%.
+- **Frontend `YouTubePublisher` in `/app/frontend/src/pages/StudioPage.jsx`** appears after a final MP4 exists. Auto-generates title from idea title/hook, description from the SPOKEN SCRIPT + HASHTAGS sections + `#Shorts`, tags from HASHTAGS section. Shows connect state / channel avatar. Includes an inline 7-step Google Cloud setup helper for first-time users.
+- **Env**: new `YOUTUBE_CLIENT_ID`, `YOUTUBE_CLIENT_SECRET`, `YOUTUBE_REDIRECT_URI` in `backend/.env` (currently empty — user completes Google Cloud setup on their end).
+- **Tested (iteration_11)**: 100% backend (7/7) + 100% frontend graceful-degradation without Google creds configured.
+
 ## Prioritized Backlog
 ### P1 — Next up
 - [ ] Studio Phase 3: multi-clip storyboard (2-3 Sora clips per video), auto-generate hero prompt from the script's B-ROLL section, batch-render.
+- [ ] TikTok publish (requires TikTok Developer app + Content Posting API approval — user needs to apply first).
 - [ ] Verify Spotify OAuth completed by the user (was authorised in-session but no confirmation).
 - [ ] ElevenLabs Aussie voice option (currently OpenAI 'onyx' American).
-- [ ] Studio Phase 4: auto-publish MP4 to TikTok / YouTube via their APIs.
 - [ ] Train custom "Hey Russell" wake word via openWakeWord Colab (instructions in `/app/pi_client/keywords/README.md`) — fully on user.
 
 ### P2 — Polish
