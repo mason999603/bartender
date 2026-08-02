@@ -21,6 +21,47 @@ from companion import build_companion_context
 logger = logging.getLogger("russell.brain")
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Web search trigger classifier — keyword-based, zero-cost. Runs before the
+# main LLM call to decide if we should hit Perplexity for live info first.
+# ──────────────────────────────────────────────────────────────────────────────
+_LIVE_INFO_KEYWORDS = (
+    "news", "latest", "today", "tonight", "this week", "this month",
+    "what's happening", "whats happening", "current", "currently",
+    "look up", "google", "search", "find out",
+    "who won", "score", "result", "results",
+    "weather forecast", "stock", "price of", "how much is",
+    "recent", "recently", "yesterday", "just released",
+    "released", "announced", "launched",
+    "when is", "when did", "when's",
+    "market", "election",
+)
+
+
+def _needs_web_search(text: str) -> bool:
+    t = (text or "").lower()
+    # Skip obvious cocktail/bar questions — Claude knows those cold.
+    bartender_signals = (
+        "recipe", "spec", "cocktail", "make me", "build me", "how do you make",
+        "shake", "stir", "syrup", "bitters", "amaro", "vermouth",
+        "add to library", "save this", "86", "in stock",
+    )
+    if any(b in t for b in bartender_signals):
+        return False
+    return any(k in t for k in _LIVE_INFO_KEYWORDS)
+
+
+def _pick_recency(text: str) -> str:
+    t = (text or "").lower()
+    if any(k in t for k in ("today", "tonight", "right now", "currently", "just now", "breaking")):
+        return "day"
+    if any(k in t for k in ("this week", "recent", "recently", "latest", "yesterday", "news")):
+        return "week"
+    if any(k in t for k in ("this month", "this year")):
+        return "month"
+    return "week"  # default: bias toward fresher results
+
+
 async def get_clash_warnings(ingredient_names: List[str]) -> List[dict]:
     names_lower = [n.lower() for n in ingredient_names]
     rules = await db.clash_rules.find({}, {"_id": 0}).to_list(1000)
@@ -297,6 +338,29 @@ async def chat_with_russell(session_id: str, user_text: str, channel: str = "web
         {"session_id": session_id}, {"_id": 0},
     ).sort("timestamp", -1).limit(20).to_list(20)
     recent.reverse()
+
+    # ──────────────────────────────────────────────────────────────────
+    # Optional live web search — cheap classifier decides if we need Perplexity.
+    # If yes, we fetch grounded facts and inject them into the system prompt so
+    # Claude answers with real citations instead of guessing.
+    # ──────────────────────────────────────────────────────────────────
+    try:
+        from .web_search import USE_PERPLEXITY, web_search as _web_search
+        if USE_PERPLEXITY and _needs_web_search(user_text):
+            recency = _pick_recency(user_text)
+            logger.info("Web search triggered — query=%r recency=%s", user_text[:80], recency)
+            search_result = await _web_search(user_text, recency=recency)
+            citations_block = "\n".join(f"  - {c}" for c in search_result.get("citations", []))
+            system_prompt += (
+                "\n\n## LIVE WEB SEARCH RESULT (grounded — use these facts as source of truth)\n"
+                f"{search_result['answer']}\n"
+                + (f"\nSources:\n{citations_block}\n" if citations_block else "")
+                + "\nAnswer the user's question in your own voice using ONLY the info above. "
+                "Don't cite by number — if a source is worth mentioning, name it naturally "
+                "(e.g., 'per the ABC…'). Never invent details the search didn't return."
+            )
+    except Exception:
+        logger.exception("Web search failed — falling back to Claude's own knowledge")
 
     # ──────────────────────────────────────────────────────────────────
     # LLM call — Claude Sonnet 4.6 via Emergent universal key
