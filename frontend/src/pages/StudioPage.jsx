@@ -19,6 +19,9 @@ import {
     YoutubeLogo,
     LinkSimple,
     CheckCircle,
+    Robot,
+    Clock,
+    Sparkle,
 } from "@phosphor-icons/react";
 
 const PLATFORMS = [
@@ -159,6 +162,9 @@ export default function StudioPage() {
                 title="Faceless content pipeline"
                 subtitle="Hook → script → voiceover. Built for TikTok and YouTube in Russell's voice."
             />
+
+            {/* ── Autopilot ─────────────────────────────────────────── */}
+            <AutopilotPanel />
 
             {/* ── Step 1: Topic + Ideas ───────────────────────────── */}
             <section className="mb-10">
@@ -1197,6 +1203,387 @@ function YouTubeSetupHelp() {
                 </ol>
             )}
         </div>
+    );
+}
+
+
+// ─────────────────────────────────────────────────────────────────
+// Autopilot panel — one big toggle, daily cron, run-now, persona
+// ─────────────────────────────────────────────────────────────────
+const STATUS_LABEL = {
+    starting: "Warming up",
+    ideating: "Writing the hook",
+    scripting: "Writing the script",
+    voicing: "Recording voiceover",
+    persona: "Prepping persona",
+    "rendering-hero": "Rendering Sora hero clip",
+    assembling: "Assembling the MP4",
+    ready: "MP4 ready — publishing",
+    "ready-not-published": "MP4 ready (YouTube not connected)",
+    published: "Published to YouTube",
+    failed: "Failed",
+};
+
+function AutopilotPanel() {
+    const [status, setStatus] = React.useState(null);
+    const [ytStatus, setYtStatus] = React.useState(null);
+    const [persona, setPersona] = React.useState(null);
+    const [running, setRunning] = React.useState(false);
+    const [regenning, setRegenning] = React.useState(false);
+    const [runs, setRuns] = React.useState([]);
+
+    const load = async () => {
+        try {
+            const [s, y, p, r] = await Promise.all([
+                api.get("/autopilot/status"),
+                api.get("/youtube/status"),
+                api.get("/autopilot/persona"),
+                api.get("/autopilot/runs"),
+            ]);
+            setStatus(s.data);
+            setYtStatus(y.data);
+            setPersona(p.data);
+            setRuns(r.data || []);
+        } catch (e) {
+            console.error(e);
+        }
+    };
+
+    React.useEffect(() => {
+        load();
+        const t = setInterval(load, 5000);
+        return () => clearInterval(t);
+    }, []);
+
+    const toggle = async () => {
+        try {
+            await api.post("/autopilot/config", { enabled: !status?.enabled });
+            toast.success(!status?.enabled ? "Autopilot ON — Russell posts daily" : "Autopilot OFF");
+            load();
+        } catch (e) {
+            toast.error(e?.response?.data?.detail || "Toggle failed");
+        }
+    };
+
+    const runNow = async () => {
+        try {
+            setRunning(true);
+            await api.post("/autopilot/run-now");
+            toast.success("Autopilot kicked off — check back in ~3 min");
+        } catch (e) {
+            toast.error(e?.response?.data?.detail || "Run failed");
+        } finally {
+            setTimeout(() => setRunning(false), 4000);
+        }
+    };
+
+    const regenPersona = async () => {
+        try {
+            setRegenning(true);
+            await api.post("/autopilot/persona/regenerate");
+            toast.success("Persona rendered");
+            load();
+        } catch (e) {
+            toast.error(e?.response?.data?.detail || "Persona render failed");
+        } finally {
+            setRegenning(false);
+        }
+    };
+
+    const connectYouTube = async () => {
+        try {
+            const r = await api.get("/youtube/login");
+            const url = r.data?.auth_url;
+            if (!url) throw new Error("No auth URL");
+            window.open(url, "yt_auth", "width=520,height=680");
+        } catch (e) {
+            toast.error(e?.response?.data?.detail || "YouTube connect failed");
+        }
+    };
+
+    const last = status?.last_run;
+    const nextRun = status?.next_run_local
+        ? new Date(status.next_run_local).toLocaleString("en-AU", {
+              weekday: "short",
+              hour: "2-digit",
+              minute: "2-digit",
+              timeZone: status?.config?.timezone || "Australia/Sydney",
+          })
+        : null;
+
+    const enabled = !!status?.enabled;
+
+    return (
+        <section className="mb-12" data-testid="autopilot-panel">
+            <div className="flex items-center gap-2 mb-3">
+                <Robot size={18} weight="fill" style={{ color: "var(--accent)" }} />
+                <span className="label-tiny">Autopilot — Russell posts on his own</span>
+            </div>
+
+            {/* Master toggle card */}
+            <div
+                className="tool-card"
+                style={{
+                    borderColor: enabled ? "var(--accent)" : undefined,
+                    borderWidth: enabled ? 1 : undefined,
+                    background: enabled ? "rgba(224,145,50,0.05)" : undefined,
+                }}
+            >
+                <div className="flex items-start justify-between gap-4 flex-wrap">
+                    <div>
+                        <div className="flex items-center gap-2 mb-1">
+                            <span
+                                className="font-serif text-2xl"
+                                style={{ color: enabled ? "var(--accent)" : "var(--text-primary)" }}
+                            >
+                                {enabled ? "Autopilot is ON" : "Autopilot is OFF"}
+                            </span>
+                            {enabled && (
+                                <span className="badge" style={{ borderColor: "var(--accent)" }}>
+                                    LIVE
+                                </span>
+                            )}
+                        </div>
+                        <div className="text-sm" style={{ color: "var(--text-secondary)" }}>
+                            {enabled
+                                ? "One 30-second Short, every day. Russell writes it, records it, films it, and publishes it. You do nothing."
+                                : "Flip the switch and Russell handles the whole pipeline from now on."}
+                        </div>
+                        {enabled && nextRun && (
+                            <div className="flex items-center gap-2 mt-3 text-sm" style={{ color: "var(--text-muted)" }}>
+                                <Clock size={14} weight="bold" style={{ color: "var(--accent)" }} />
+                                Next post: <b style={{ color: "var(--text-primary)" }}>{nextRun}</b>
+                                <span className="opacity-60">(Sydney)</span>
+                            </div>
+                        )}
+                    </div>
+                    <div className="flex flex-col items-end gap-2">
+                        <button
+                            className={enabled ? "btn-ghost" : "btn-amber"}
+                            onClick={toggle}
+                            data-testid="autopilot-toggle"
+                        >
+                            {enabled ? "Turn OFF" : "Turn ON"}
+                        </button>
+                        <button
+                            className="btn-ghost text-sm"
+                            onClick={runNow}
+                            disabled={running}
+                            data-testid="autopilot-run-now"
+                        >
+                            {running ? "Kicked off..." : "Run one now"}
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            {/* Sub-grid: Persona + YouTube + Last run */}
+            <div className="grid md:grid-cols-3 gap-3 mt-3">
+                {/* Persona */}
+                <div className="tool-card" data-testid="autopilot-persona-card">
+                    <div className="flex items-center gap-2 mb-2">
+                        <Sparkle size={14} weight="fill" style={{ color: "var(--accent)" }} />
+                        <span className="label-tiny">Russell&apos;s face</span>
+                    </div>
+                    {persona?.image_ready ? (
+                        <img
+                            src={`${process.env.REACT_APP_BACKEND_URL}${persona.image_url}?v=${persona.id || ""}`}
+                            alt="Russell persona"
+                            className="rounded-lg mb-2 w-full max-w-[140px] aspect-square object-cover"
+                        />
+                    ) : (
+                        <div
+                            className="rounded-lg mb-2 w-full max-w-[140px] aspect-square flex items-center justify-center text-xs text-center"
+                            style={{
+                                background: "rgba(0,0,0,0.4)",
+                                color: "var(--text-muted)",
+                            }}
+                        >
+                            Not rendered yet — will render on first run
+                        </div>
+                    )}
+                    <div className="text-xs mb-2" style={{ color: "var(--text-muted)" }}>
+                        {persona?.name || "Russell"} — {persona?.id || "russell-v1"}
+                    </div>
+                    <button
+                        className="btn-ghost text-sm w-full"
+                        onClick={regenPersona}
+                        disabled={regenning}
+                        data-testid="autopilot-persona-regen"
+                    >
+                        {regenning ? "Rendering..." : persona?.image_ready ? "Re-render face" : "Render face now"}
+                    </button>
+                </div>
+
+                {/* YouTube */}
+                <div className="tool-card" data-testid="autopilot-youtube-card">
+                    <div className="flex items-center gap-2 mb-2">
+                        <YoutubeLogo size={14} weight="fill" style={{ color: "#FF0000" }} />
+                        <span className="label-tiny">YouTube channel</span>
+                    </div>
+                    {ytStatus?.connected ? (
+                        <>
+                            {ytStatus.channel_thumbnail && (
+                                <img
+                                    src={ytStatus.channel_thumbnail}
+                                    alt=""
+                                    className="w-10 h-10 rounded-full mb-2"
+                                />
+                            )}
+                            <div className="text-sm" style={{ color: "var(--text-primary)" }}>
+                                {ytStatus.channel_title}
+                            </div>
+                            <div className="text-xs mt-1" style={{ color: "var(--accent)" }}>
+                                Connected · publishing public
+                            </div>
+                        </>
+                    ) : (
+                        <>
+                            <div className="text-sm mb-2" style={{ color: "var(--text-primary)" }}>
+                                Not connected yet. Videos will still render daily — they queue up until you connect.
+                            </div>
+                            <button
+                                className="btn-amber text-sm w-full"
+                                onClick={connectYouTube}
+                                data-testid="autopilot-connect-yt"
+                            >
+                                Connect YouTube
+                            </button>
+                        </>
+                    )}
+                </div>
+
+                {/* Last run */}
+                <div className="tool-card" data-testid="autopilot-lastrun-card">
+                    <div className="flex items-center gap-2 mb-2">
+                        <FilmSlate size={14} weight="fill" style={{ color: "var(--accent)" }} />
+                        <span className="label-tiny">Latest run</span>
+                    </div>
+                    {!last && (
+                        <div className="text-sm" style={{ color: "var(--text-muted)" }}>
+                            No runs yet. Hit &quot;Run one now&quot; to see Russell work.
+                        </div>
+                    )}
+                    {last && (
+                        <>
+                            <div className="text-xs" style={{ color: "var(--text-muted)" }}>
+                                {new Date(last.created_at).toLocaleString(undefined, {
+                                    hour: "2-digit",
+                                    minute: "2-digit",
+                                    month: "short",
+                                    day: "numeric",
+                                })}{" "}
+                                · {last.trigger}
+                            </div>
+                            <div
+                                className="font-serif text-lg my-1"
+                                style={{ color: "var(--accent)" }}
+                            >
+                                {last.idea?.title || "…"}
+                            </div>
+                            <div
+                                className="text-xs mb-2"
+                                style={{
+                                    color:
+                                        last.status === "failed"
+                                            ? "#FCA5A5"
+                                            : last.status === "published"
+                                            ? "var(--accent)"
+                                            : "var(--text-secondary)",
+                                }}
+                            >
+                                {STATUS_LABEL[last.status] || last.status}
+                            </div>
+                            {last.final_url && (
+                                <video
+                                    src={`${process.env.REACT_APP_BACKEND_URL}${last.final_url}`}
+                                    controls
+                                    className="w-full rounded-lg mb-2"
+                                    data-testid="autopilot-lastrun-video"
+                                />
+                            )}
+                            {last.video_url && (
+                                <a
+                                    href={last.video_url}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="btn-ghost text-xs w-full inline-flex items-center justify-center"
+                                    data-testid="autopilot-lastrun-yt-link"
+                                >
+                                    <CheckCircle size={12} weight="fill" className="inline mr-1" />
+                                    {last.video_url.replace("https://", "")}
+                                </a>
+                            )}
+                            {last.error && (
+                                <div className="text-xs mt-2" style={{ color: "#FCA5A5" }}>
+                                    {last.error}
+                                </div>
+                            )}
+                        </>
+                    )}
+                </div>
+            </div>
+
+            {/* History strip */}
+            {runs.length > 1 && (
+                <details className="mt-4">
+                    <summary
+                        className="text-sm cursor-pointer"
+                        style={{ color: "var(--text-muted)" }}
+                    >
+                        History ({runs.length})
+                    </summary>
+                    <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-2 mt-3">
+                        {runs.slice(1, 10).map((r) => (
+                            <div
+                                key={r.id}
+                                className="tool-card"
+                                data-testid={`autopilot-history-${r.id}`}
+                            >
+                                <div className="text-xs" style={{ color: "var(--text-muted)" }}>
+                                    {new Date(r.created_at).toLocaleString(undefined, {
+                                        month: "short",
+                                        day: "numeric",
+                                        hour: "2-digit",
+                                        minute: "2-digit",
+                                    })}
+                                </div>
+                                <div
+                                    className="font-serif text-sm"
+                                    style={{ color: "var(--accent)" }}
+                                >
+                                    {r.idea?.title || r.status}
+                                </div>
+                                <div
+                                    className="text-xs"
+                                    style={{
+                                        color:
+                                            r.status === "failed"
+                                                ? "#FCA5A5"
+                                                : r.status === "published"
+                                                ? "var(--accent)"
+                                                : "var(--text-secondary)",
+                                    }}
+                                >
+                                    {STATUS_LABEL[r.status] || r.status}
+                                </div>
+                                {r.video_url && (
+                                    <a
+                                        href={r.video_url}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="text-xs"
+                                        style={{ color: "var(--accent)" }}
+                                    >
+                                        View →
+                                    </a>
+                                )}
+                            </div>
+                        ))}
+                    </div>
+                </details>
+            )}
+        </section>
     );
 }
 

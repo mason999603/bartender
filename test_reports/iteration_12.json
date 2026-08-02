@@ -1,0 +1,32 @@
+{
+  "summary": "Autopilot Phase 3 full-stack test with real YouTube OAuth creds in backend/.env. Backend: 7/7 pytest passed in 43.8s covering status/config/persona/topics/youtube-gate/run-now. Persona image rendered live via GPT-Image-1 and served at /api/studio/media/persona.png (bytes > 10k, image/png). YouTube gate: GET /api/youtube/status = {connected:false}, GET /api/youtube/login now returns a real auth_url on accounts.google.com — proves creds took effect. run-now progressed and terminated at status='failed' with error 'Sora returned no bytes (safety filter or timeout)' — per test spec this is a valid terminal outcome (status transitions + error surface both work); main agent should soften the character-referenced Sora prompt to reduce safety-refusal rate. Frontend /studio: AutopilotPanel present with all 7 data-testid nodes (autopilot-panel, -toggle, -run-now, -persona-card, -persona-regen, -youtube-card, -connect-yt, -lastrun-card). 'Autopilot is ON' + LIVE badge, Next post 'Mon 07:00 am (Sydney)' visible, YouTube card shows 'Not connected' + Connect button, latest run card displays the failed run with error. Toggle OFF flipped copy to 'Autopilot is OFF', toggle back to ON restored 'Autopilot is ON' — full round-trip working.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/autopilot/status & /config", "issue": "Response includes internal Mongo doc key `_id: 'primary'` under config. Harmless (string, not ObjectId) but leaks storage detail — consider projecting {_id:0} in load_config."},
+      {"endpoint": "/api/autopilot/run-now (Sora stage)", "issue": "Character-referenced Sora hero clip is being safety-refused → status='failed' with 'Sora returned no bytes (safety filter or timeout)'. Persona image renders fine on its own, so the refusal is likely in the composed Sora prompt (Russell + drink action). Recommend main agent make the persona reference optional / retry with a neutral prompt fallback."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_autopilot.py",
+    "/app/test_reports/pytest/autopilot_results.xml"
+  ],
+  "action_items": [
+    "Soften Sora hero-clip prompt or add a neutral-prompt retry so autopilot lands at 'ready-not-published' instead of 'failed' when character reference trips the safety filter.",
+    "Project out `_id` in autopilot config responses (cosmetic)."
+  ],
+  "critical_code_review_comments": [
+    "autopilot_routes.get_config/status return the raw config doc including `_id`. Use `{_id:0}` projection or pop it in save_config/load_config.",
+    "run_now uses asyncio.create_task(_bg()) with no task tracking — same fire-and-forget pattern flagged in iteration 11 for YouTube. On server shutdown pending Sora renders would be GC'd.",
+    "autopilot.produce_and_publish surfaces Sora failure as a generic string; a machine-readable error_code (e.g. 'sora_safety_refusal') would let the frontend show a friendlier retry-with-neutral-prompt CTA."
+  ],
+  "updated_files": ["/app/backend/tests/test_autopilot.py"],
+  "success_rate": {"backend": "100% (7/7)", "frontend": "100% (all assertions passed)"},
+  "test_credentials": "N/A — YouTube OAuth not completed by design (requires human).",
+  "seed_data_creation": "Test transiently added and removed topic 'TEST_topic_autopilot'. One autopilot run doc was inserted by run-now (kept for main agent inspection).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Autopilot backend + frontend chrome are fully green. Only outstanding functional gap is Sora prompt occasionally getting safety-refused on character-referenced clips (persona render works, script/voice/persona stages complete, Sora hero-clip is where it fails). Next iteration should re-run /api/autopilot/run-now after prompt softening and expect status ∈ {ready-not-published, published}. Once user completes YouTube OAuth manually, expected steady-state is 'published' with a private video ID.",
+  "rca_of_the_issue": "Sora hero-clip Sora call returns zero bytes. Root cause is one of: (a) the character-referenced prompt (Russell as visible bartender) hits OpenAI Sora safety filter for real-person likeness, or (b) the 8s Sora job times out under upstream load. persona.png rendered fine via GPT-Image-1 so image creds are healthy — only the video call is affected. Mitigation: retry with a neutral-face prompt (blur/omit Russell) or increase timeout + accept partial fallback."
+}

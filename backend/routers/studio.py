@@ -278,9 +278,10 @@ class HeroClipRequest(BaseModel):
     aspect: str = "portrait"  # portrait | square | landscape
     duration: int = 4  # 4 | 8 | 12
     model: str = "sora-2"  # sora-2 | sora-2-pro
+    image_filename: str | None = None  # optional reference image already in MEDIA_DIR
 
 
-async def _run_sora_job(job_id: str, prompt: str, size: str, duration: int, model: str) -> None:
+async def _run_sora_job(job_id: str, prompt: str, size: str, duration: int, model: str, image_path: str | None = None) -> None:
     """Blocking Sora call executed in a worker thread. Saves MP4 to MEDIA_DIR."""
     try:
         await _update_job(job_id, status="rendering")
@@ -298,6 +299,8 @@ async def _run_sora_job(job_id: str, prompt: str, size: str, duration: int, mode
             size=size,
             duration=duration,
             max_wait_time=600,
+            image_path=image_path,
+            mime_type="image/png" if (image_path or "").lower().endswith(".png") else "image/jpeg",
         )
 
         if not video_bytes:
@@ -335,12 +338,19 @@ async def create_hero_clip(req: HeroClipRequest):
         raise HTTPException(400, "Provide a prompt")
 
     size = size_table[req.aspect]
+    image_path: str | None = None
+    if req.image_filename:
+        p = _media_path(req.image_filename)
+        if not p.exists():
+            raise HTTPException(404, f"reference image not found: {req.image_filename}")
+        image_path = str(p)
+
     job_id = await _create_job(
         "hero-clip",
-        {"prompt": prompt, "aspect": req.aspect, "size": size, "duration": req.duration, "model": req.model},
+        {"prompt": prompt, "aspect": req.aspect, "size": size, "duration": req.duration, "model": req.model, "image_filename": req.image_filename},
     )
     # Fire and forget
-    asyncio.create_task(_run_sora_job(job_id, prompt, size, req.duration, req.model))
+    asyncio.create_task(_run_sora_job(job_id, prompt, size, req.duration, req.model, image_path))
     return {"id": job_id, "status": "queued"}
 
 

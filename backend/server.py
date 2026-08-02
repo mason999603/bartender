@@ -36,6 +36,7 @@ from routers import (  # noqa: E402
     twilio_routes,
     voice,
     youtube_routes,
+    autopilot_routes,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -121,7 +122,21 @@ async def seed_db():
 
 @app.on_event("shutdown")
 async def shutdown_db():
+    try:
+        from core.scheduler import shutdown_scheduler
+        await shutdown_scheduler()
+    except Exception:
+        logger.exception("Scheduler shutdown failed")
     client.close()
+
+
+@app.on_event("startup")
+async def start_autopilot_scheduler():
+    try:
+        from core.scheduler import start_scheduler
+        await start_scheduler()
+    except Exception:
+        logger.exception("Failed to start autopilot scheduler")
 
 
 @api_router.get("/")
@@ -147,6 +162,7 @@ for r in (
     telegram_routes.router,
     studio.router,
     youtube_routes.router,
+    autopilot_routes.router,
 ):
     api_router.include_router(r)
 
