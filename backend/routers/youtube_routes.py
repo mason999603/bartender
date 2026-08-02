@@ -45,20 +45,39 @@ MEDIA_DIR = Path(os.environ.get("STUDIO_MEDIA_DIR", "/app/backend/generated/stud
 @router.get("/login")
 async def youtube_login():
     try:
-        auth_url, _state = get_authorize_url()
+        auth_url, state, code_verifier = get_authorize_url()
+        # Persist the PKCE verifier keyed by state so /callback can restore it.
+        # Short-lived — anything older than 10 minutes will be treated as expired.
+        await db.youtube_oauth_state.insert_one(
+            {
+                "state": state,
+                "code_verifier": code_verifier,
+                "created_at": now_iso(),
+            }
+        )
         return {"auth_url": auth_url}
     except RuntimeError as e:
         raise HTTPException(503, str(e))
 
 
 @router.get("/callback")
-async def youtube_callback(code: str | None = None, error: str | None = None):
+async def youtube_callback(code: str | None = None, error: str | None = None, state: str | None = None):
     if error:
         return HTMLResponse(_callback_html(False, f"Google said: {error}"))
     if not code:
         raise HTTPException(400, "Missing `code` parameter from Google")
+
+    # Restore the PKCE code_verifier we persisted at /login time
+    code_verifier = None
+    if state:
+        pending = await db.youtube_oauth_state.find_one({"state": state})
+        if pending:
+            code_verifier = pending.get("code_verifier")
+            # Single-use: delete once consumed
+            await db.youtube_oauth_state.delete_one({"state": state})
+
     try:
-        await exchange_code_for_tokens(db, code)
+        await exchange_code_for_tokens(db, code, code_verifier=code_verifier)
     except Exception as e:
         logger.exception("YouTube code exchange failed")
         return HTMLResponse(_callback_html(False, str(e)))

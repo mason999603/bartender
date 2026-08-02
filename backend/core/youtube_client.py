@@ -57,8 +57,11 @@ def _flow(state: Optional[str] = None) -> Flow:
     return flow
 
 
-def get_authorize_url() -> tuple[str, str]:
-    """Return (auth_url, state). Caller doesn't need to keep state — Google echoes it back."""
+def get_authorize_url() -> tuple[str, str, str]:
+    """Return (auth_url, state, code_verifier). PKCE is enforced by Google now — the
+    caller must persist code_verifier alongside state so we can restore it in the
+    callback (login and callback run in separate requests, potentially different
+    Flow instances)."""
     flow = _flow()
     auth_url, state = flow.authorization_url(
         access_type="offline",
@@ -66,12 +69,18 @@ def get_authorize_url() -> tuple[str, str]:
         # `consent` guarantees a refresh_token even if the user has authorised before.
         prompt="consent",
     )
-    return auth_url, state
+    # google-auth-oauthlib sets flow.code_verifier automatically when it uses PKCE.
+    return auth_url, state, getattr(flow, "code_verifier", "") or ""
 
 
-async def exchange_code_for_tokens(db: AsyncIOMotorDatabase, code: str) -> dict:
+async def exchange_code_for_tokens(
+    db: AsyncIOMotorDatabase, code: str, code_verifier: str | None = None
+) -> dict:
     """Exchange the OAuth code for a refresh token + channel info, persist it."""
     flow = _flow()
+    if code_verifier:
+        # Restore the verifier so PKCE completes correctly.
+        flow.code_verifier = code_verifier
     flow.fetch_token(code=code)
     creds = flow.credentials
     if not creds.refresh_token:
