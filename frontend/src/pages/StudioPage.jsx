@@ -13,6 +13,9 @@ import {
     Play,
     Pause,
     ArrowClockwise,
+    VideoCamera,
+    Image as ImageIcon,
+    Download,
 } from "@phosphor-icons/react";
 
 const PLATFORMS = [
@@ -266,7 +269,7 @@ export default function StudioPage() {
                                 &ldquo;{selectedIdea.hook}&rdquo;
                             </div>
                         </div>
-                        <div className="flex flex-wrap gap-2 mb-3">
+                        <div className="flex flex-wrap gap-2 mb-1">
                             {PLATFORMS.map((p) => (
                                 <button
                                     key={p.key}
@@ -278,6 +281,11 @@ export default function StudioPage() {
                                 </button>
                             ))}
                         </div>
+                        {platform === "both" && (
+                            <p className="text-xs mb-3" style={{ color: "var(--text-muted)" }}>
+                                Heads up — &ldquo;Both&rdquo; generates short + long-form. Takes ~90s and can time out. Prefer picking one.
+                            </p>
+                        )}
                         <div className="flex flex-wrap gap-2">
                             <button
                                 className="btn-amber"
@@ -345,6 +353,17 @@ export default function StudioPage() {
                         <span className="label-tiny">Step 3 — Voiceover</span>
                     </div>
                     <VoiceoverPlayer text={spokenScript} />
+                </section>
+            )}
+
+            {/* ── Step 4: Video Production (Phase 2) ──────────────── */}
+            {spokenScript && (
+                <section className="mb-10">
+                    <div className="flex items-center gap-2 mb-3">
+                        <VideoCamera size={18} weight="fill" style={{ color: "var(--accent)" }} />
+                        <span className="label-tiny">Step 4 — Video production</span>
+                    </div>
+                    <VideoProducer spokenScript={spokenScript} hookText={selectedIdea?.hook || ""} />
                 </section>
             )}
 
@@ -507,6 +526,326 @@ function VoiceoverPlayer({ text }) {
                     data-testid="studio-audio-el"
                 />
             )}
+        </div>
+    );
+}
+
+
+// ─────────────────────────────────────────────────────────────────
+// Video producer — Sora 2 hero clip + optional image card + ffmpeg
+// ─────────────────────────────────────────────────────────────────
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
+
+function VideoProducer({ spokenScript, hookText }) {
+    const [heroPrompt, setHeroPrompt] = useState(
+        "Cinematic slow-motion close up of amber whisky pouring over ice in a rocks glass, warm dim bar lighting, moody film photograph"
+    );
+    const [duration, setDuration] = useState(4);
+    const [model, setModel] = useState("sora-2");
+
+    const [cardPrompt, setCardPrompt] = useState("");
+    const [captionText, setCaptionText] = useState(hookText || "");
+
+    const [heroJob, setHeroJob] = useState(null);
+    const [voiceJob, setVoiceJob] = useState(null);
+    const [cardJob, setCardJob] = useState(null);
+    const [finalJob, setFinalJob] = useState(null);
+
+    useEffect(() => {
+        if (hookText && !captionText) setCaptionText(hookText);
+    }, [hookText, captionText]);
+
+    const pollJob = async (id, setter) => {
+        for (let i = 0; i < 240; i++) {
+            try {
+                const r = await api.get(`/studio/jobs/${id}`);
+                setter(r.data);
+                if (r.data.status === "done" || r.data.status === "failed") return r.data;
+            } catch {
+                /* keep polling */
+            }
+            await new Promise((res) => setTimeout(res, 5000));
+        }
+        return null;
+    };
+
+    const generateHero = async () => {
+        if (!heroPrompt.trim()) return toast.error("Give Sora a prompt");
+        try {
+            const r = await api.post("/studio/jobs/hero-clip", {
+                prompt: heroPrompt,
+                aspect: "portrait",
+                duration,
+                model,
+            });
+            setHeroJob({ id: r.data.id, status: "queued" });
+            const result = await pollJob(r.data.id, setHeroJob);
+            if (result?.status === "failed") toast.error(result.error || "Hero render failed");
+            else if (result?.status === "done") toast.success("Hero clip rendered");
+        } catch (e) {
+            toast.error(e?.response?.data?.detail || "Sora request failed");
+        }
+    };
+
+    const generateVoice = async () => {
+        try {
+            const r = await api.post("/studio/jobs/voiceover", { text: spokenScript, voice: "onyx" });
+            setVoiceJob(r.data);
+            toast.success("Voiceover saved");
+        } catch (e) {
+            toast.error(e?.response?.data?.detail || "Voiceover failed");
+        }
+    };
+
+    const generateCard = async () => {
+        const prompt = cardPrompt.trim();
+        if (!prompt) return toast.error("Give the image card a prompt");
+        try {
+            setCardJob({ status: "rendering" });
+            const r = await api.post("/studio/jobs/image-card", { prompt, quality: "medium" });
+            setCardJob(r.data);
+            toast.success("Image card ready");
+        } catch (e) {
+            setCardJob(null);
+            toast.error(e?.response?.data?.detail || "Image card failed");
+        }
+    };
+
+    const assemble = async () => {
+        if (!heroJob?.output?.filename) return toast.error("Render the hero clip first");
+        if (!voiceJob?.filename) return toast.error("Generate the voiceover first");
+        try {
+            const r = await api.post("/studio/jobs/assemble", {
+                hero_filename: heroJob.output.filename,
+                voice_filename: voiceJob.filename,
+                caption: captionText,
+                outro_image_filename: cardJob?.filename || null,
+            });
+            setFinalJob({ id: r.data.id, status: "queued" });
+            const result = await pollJob(r.data.id, setFinalJob);
+            if (result?.status === "failed") toast.error(result.error || "Assembly failed");
+            else if (result?.status === "done") toast.success("Final MP4 ready");
+        } catch (e) {
+            toast.error(e?.response?.data?.detail || "Assemble failed");
+        }
+    };
+
+    const heroDone = heroJob?.status === "done" && heroJob?.output?.url;
+    const voiceDone = !!voiceJob?.url;
+    const cardDone = cardJob?.status === "done" && cardJob?.url;
+    const finalDone = finalJob?.status === "done" && finalJob?.output?.url;
+
+    return (
+        <div className="tool-card space-y-8">
+            {/* Hero clip */}
+            <div>
+                <div className="flex items-center gap-2 mb-2">
+                    <VideoCamera size={16} weight="fill" style={{ color: "var(--accent)" }} />
+                    <span className="label-tiny">Sora 2 hero clip (portrait, 720x1280)</span>
+                </div>
+                <textarea
+                    className="input-dark w-full"
+                    rows={3}
+                    value={heroPrompt}
+                    onChange={(e) => setHeroPrompt(e.target.value)}
+                    placeholder="Describe the hero shot Sora should render..."
+                    data-testid="studio-hero-prompt"
+                />
+                <div className="flex flex-wrap gap-2 mt-2 items-center">
+                    <label className="text-xs" style={{ color: "var(--text-muted)" }}>
+                        Duration
+                    </label>
+                    {[4, 8, 12].map((d) => (
+                        <button
+                            key={d}
+                            onClick={() => setDuration(d)}
+                            className={`nav-link ${duration === d ? "active" : ""}`}
+                            data-testid={`studio-hero-dur-${d}`}
+                        >
+                            {d}s
+                        </button>
+                    ))}
+                    <label className="text-xs ml-4" style={{ color: "var(--text-muted)" }}>
+                        Model
+                    </label>
+                    {["sora-2", "sora-2-pro"].map((m) => (
+                        <button
+                            key={m}
+                            onClick={() => setModel(m)}
+                            className={`nav-link ${model === m ? "active" : ""}`}
+                            data-testid={`studio-hero-model-${m}`}
+                        >
+                            {m}
+                        </button>
+                    ))}
+                </div>
+                <div className="flex flex-wrap gap-2 mt-3">
+                    <button
+                        className="btn-amber"
+                        onClick={generateHero}
+                        disabled={heroJob?.status === "rendering" || heroJob?.status === "queued"}
+                        data-testid="studio-hero-generate"
+                    >
+                        {heroJob?.status === "rendering" || heroJob?.status === "queued" ? (
+                            <>
+                                <ArrowClockwise size={14} weight="bold" className="inline mr-2 animate-spin" />
+                                Sora is cooking... ({heroJob?.status})
+                            </>
+                        ) : heroDone ? (
+                            "Re-render hero"
+                        ) : (
+                            "Render hero clip"
+                        )}
+                    </button>
+                    {heroDone && (
+                        <a
+                            href={`${BACKEND_URL}${heroJob.output.url}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="btn-ghost"
+                            data-testid="studio-hero-preview"
+                        >
+                            <Play size={14} weight="fill" className="inline mr-1" /> Preview
+                        </a>
+                    )}
+                </div>
+                {heroJob?.status === "failed" && (
+                    <p className="text-xs mt-2" style={{ color: "#FCA5A5" }}>
+                        {heroJob.error}
+                    </p>
+                )}
+                {heroDone && (
+                    <video
+                        src={`${BACKEND_URL}${heroJob.output.url}`}
+                        controls
+                        className="w-full max-w-xs mt-3 rounded-lg"
+                        data-testid="studio-hero-video"
+                    />
+                )}
+            </div>
+
+            {/* Voiceover (uses spoken script) */}
+            <div>
+                <div className="flex items-center gap-2 mb-2">
+                    <SpeakerHigh size={16} weight="fill" style={{ color: "var(--accent)" }} />
+                    <span className="label-tiny">Save voiceover (needed for assembly)</span>
+                </div>
+                <button
+                    className={`${voiceDone ? "btn-ghost" : "btn-amber"}`}
+                    onClick={generateVoice}
+                    data-testid="studio-voice-save"
+                >
+                    {voiceDone ? "Re-render voiceover" : "Save voiceover to server"}
+                </button>
+                {voiceDone && (
+                    <audio
+                        src={`${BACKEND_URL}${voiceJob.url}`}
+                        controls
+                        className="w-full mt-3"
+                        data-testid="studio-voice-audio"
+                    />
+                )}
+            </div>
+
+            {/* Optional image outro */}
+            <div>
+                <div className="flex items-center gap-2 mb-2">
+                    <ImageIcon size={16} weight="fill" style={{ color: "var(--accent)" }} />
+                    <span className="label-tiny">Optional outro card (GPT-Image-1)</span>
+                </div>
+                <input
+                    className="input-dark w-full"
+                    placeholder="e.g. 'Text overlay: Follow for more. Amber neon on black.'"
+                    value={cardPrompt}
+                    onChange={(e) => setCardPrompt(e.target.value)}
+                    data-testid="studio-card-prompt"
+                />
+                <button
+                    className="btn-ghost mt-2"
+                    onClick={generateCard}
+                    disabled={cardJob?.status === "rendering"}
+                    data-testid="studio-card-generate"
+                >
+                    {cardJob?.status === "rendering"
+                        ? "Painting..."
+                        : cardDone
+                        ? "Re-render card"
+                        : "Render outro card"}
+                </button>
+                {cardDone && (
+                    <img
+                        src={`${BACKEND_URL}${cardJob.url}`}
+                        alt="outro card"
+                        className="mt-3 max-w-xs rounded-lg"
+                        data-testid="studio-card-img"
+                    />
+                )}
+            </div>
+
+            {/* Assembly */}
+            <div>
+                <div className="flex items-center gap-2 mb-2">
+                    <FilmSlate size={16} weight="fill" style={{ color: "var(--accent)" }} />
+                    <span className="label-tiny">Assemble final MP4</span>
+                </div>
+                <input
+                    className="input-dark w-full mb-2"
+                    placeholder="Caption overlay text (optional)"
+                    value={captionText}
+                    onChange={(e) => setCaptionText(e.target.value)}
+                    data-testid="studio-caption-input"
+                />
+                <button
+                    className="btn-amber"
+                    onClick={assemble}
+                    disabled={
+                        !heroDone ||
+                        !voiceDone ||
+                        finalJob?.status === "rendering" ||
+                        finalJob?.status === "queued"
+                    }
+                    data-testid="studio-assemble"
+                >
+                    {finalJob?.status === "rendering" || finalJob?.status === "queued" ? (
+                        <>
+                            <ArrowClockwise size={14} weight="bold" className="inline mr-2 animate-spin" />
+                            Stitching...
+                        </>
+                    ) : finalDone ? (
+                        "Re-assemble"
+                    ) : (
+                        "Assemble MP4"
+                    )}
+                </button>
+                {finalJob?.status === "failed" && (
+                    <p className="text-xs mt-2" style={{ color: "#FCA5A5" }}>
+                        {finalJob.error}
+                    </p>
+                )}
+                {finalDone && (
+                    <div className="mt-4">
+                        <video
+                            src={`${BACKEND_URL}${finalJob.output.url}`}
+                            controls
+                            className="w-full max-w-xs rounded-lg"
+                            data-testid="studio-final-video"
+                        />
+                        <a
+                            href={`${BACKEND_URL}${finalJob.output.url}`}
+                            download={`russell-${finalJob.id}.mp4`}
+                            className="btn-ghost mt-3 inline-flex"
+                            data-testid="studio-final-download"
+                        >
+                            <Download size={14} weight="bold" className="inline mr-1" /> Download MP4
+                        </a>
+                    </div>
+                )}
+                {(!heroDone || !voiceDone) && (
+                    <p className="text-xs mt-2" style={{ color: "var(--text-muted)" }}>
+                        Render the hero clip and save the voiceover before assembling.
+                    </p>
+                )}
+            </div>
         </div>
     );
 }

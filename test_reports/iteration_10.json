@@ -1,0 +1,26 @@
+{
+  "summary": "Russell's Studio Phase 2 tested end-to-end. Backend: 8/8 pytest cases passed (voiceover MP3 sync, image-card PNG sync, all 3 hero-clip validation guards for duration/model/square-on-sora-2, Sora 2 hero render 4s portrait completed within ~60s with .mp4 output > 100kB, ffmpeg assemble produced final .mp4 downloadable at 200/video/mp4, jobs list includes both created jobs). Frontend: full /studio pipeline ran green with all data-testids present — 'espresso martini' ideas → click first → TikTok tab → Write the script (2756 chars, includes '## SPOKEN SCRIPT') → Save voiceover appears audio element → Render hero clip button flipped to 'Sora is cooking... (rendering)' and hero video appeared at ~60s → Assemble MP4 produced final-video + download link at ~20s. Sora completed on the whisky-pour prompt first try (no safety-retry needed). No 502s, no ingress issues, no console errors.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": { "ui_bugs": [], "integration_issues": [], "design_issues": [] },
+  "test_report_links": [
+    "/app/tests/test_studio_phase2.py",
+    "/app/backend/tests/test_studio.py",
+    "/app/test_reports/pytest/phase2_studio_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "studio.py monkey-patches OpenAIVideoGeneration.SIZES on every Sora call. Works, but a one-time patch at import time (module level) would be cleaner and cheaper.",
+    "assemble endpoint calls _media_path even when outro_image_filename is None but the empty-string branch is fine — no bug, just noting the ternary catches both.",
+    "generated/studio/ has no size cap or retention policy. On a busy day this dir will fill the container disk. Recommend a background sweeper or per-user quota.",
+    "hero-clip params 'aspect' and 'duration' are validated via 400s but 'prompt' > 4000 chars is not truncated (voiceover truncates). Consider aligning behaviour.",
+    "GET /studio/media/{filename} sanitises via basename which prevents traversal — good; no auth on media though, which is fine for public preview usage but note it's world-readable."
+  ],
+  "updated_files": ["/app/tests/test_studio_phase2.py"],
+  "success_rate": { "backend": "100% (8/8)", "frontend": "100%" },
+  "test_credentials": "n/a — Studio has no auth gating",
+  "seed_data_creation": "Generated 1 voiceover mp3, 1 image-card png, 1 Sora hero-clip mp4, 1 assembled final mp4 under /app/backend/generated/studio/. These are pipeline artifacts, safe to keep or purge.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Phase 2 fully green. Backend Sora call is ~60s for a 4s portrait clip using sora-2. When retesting UI, prefer 4s duration to keep runs fast. If a hero prompt gets safety-refused, the router surfaces status=failed with error text — the FE toast will show it and a retry with a benign prompt like 'a still life of a rocks glass with amber liquid, cinematic' clears it.",
+  "rca of the issue": "n/a — no defects found this iteration."
+}
