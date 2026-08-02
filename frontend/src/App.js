@@ -11,6 +11,7 @@ import MemoryPage from "@/pages/MemoryPage";
 import InventoryPage from "@/pages/InventoryPage";
 import PhonePage from "@/pages/PhonePage";
 import CollectionsPage from "@/pages/CollectionsPage";
+import StudioPage from "@/pages/StudioPage";
 import { ServiceModeProvider } from "@/context/ServiceModeContext";
 
 function App() {
@@ -28,6 +29,7 @@ function App() {
                             <Route path="/regulars" element={<RegularsPage />} />
                             <Route path="/memory" element={<MemoryPage />} />
                             <Route path="/collections" element={<CollectionsPage />} />
+                            <Route path="/studio" element={<StudioPage />} />
                             <Route path="/phone" element={<PhonePage />} />
                         </Routes>
                     </main>

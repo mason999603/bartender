@@ -11,6 +11,7 @@ import {
     Stack,
     Coffee,
     DotsThree,
+    FilmSlate,
 } from "@phosphor-icons/react";
 import { useServiceMode } from "@/context/ServiceModeContext";
 
@@ -22,6 +23,7 @@ const NAV = [
     { to: "/inventory", label: "Bar", icon: Package, testid: "nav-inventory" },
     { to: "/regulars", label: "Regulars", icon: Users, testid: "nav-regulars" },
     { to: "/collections", label: "Crates", icon: Stack, testid: "nav-collections" },
+    { to: "/studio", label: "Studio", icon: FilmSlate, testid: "nav-studio" },
     { to: "/memory", label: "Memory", icon: Brain, testid: "nav-memory" },
     { to: "/phone", label: "Phone", icon: Phone, testid: "nav-phone" },
 ];
