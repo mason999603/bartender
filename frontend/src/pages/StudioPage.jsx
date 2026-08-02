@@ -16,6 +16,9 @@ import {
     VideoCamera,
     Image as ImageIcon,
     Download,
+    YoutubeLogo,
+    LinkSimple,
+    CheckCircle,
 } from "@phosphor-icons/react";
 
 const PLATFORMS = [
@@ -363,7 +366,12 @@ export default function StudioPage() {
                         <VideoCamera size={18} weight="fill" style={{ color: "var(--accent)" }} />
                         <span className="label-tiny">Step 4 — Video production</span>
                     </div>
-                    <VideoProducer spokenScript={spokenScript} hookText={selectedIdea?.hook || ""} />
+                    <VideoProducer
+                        spokenScript={spokenScript}
+                        hookText={selectedIdea?.hook || ""}
+                        titleText={selectedIdea?.title || ""}
+                        scriptMarkdown={script}
+                    />
                 </section>
             )}
 
@@ -536,7 +544,7 @@ function VoiceoverPlayer({ text }) {
 // ─────────────────────────────────────────────────────────────────
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 
-function VideoProducer({ spokenScript, hookText }) {
+function VideoProducer({ spokenScript, hookText, titleText, scriptMarkdown }) {
     const [heroPrompt, setHeroPrompt] = useState(
         "Cinematic slow-motion close up of amber whisky pouring over ice in a rocks glass, warm dim bar lighting, moody film photograph"
     );
@@ -846,6 +854,349 @@ function VideoProducer({ spokenScript, hookText }) {
                     </p>
                 )}
             </div>
+
+            {/* Publish to YouTube (shown once we have a final MP4) */}
+            {finalDone && (
+                <YouTubePublisher
+                    filename={finalJob.output.filename}
+                    titleText={titleText}
+                    hookText={hookText}
+                    scriptMarkdown={scriptMarkdown}
+                />
+            )}
         </div>
     );
 }
+
+// ─────────────────────────────────────────────────────────────────
+// YouTube publisher — connect account + upload MP4 as a Short
+// ─────────────────────────────────────────────────────────────────
+function extractHashtags(script) {
+    if (!script) return [];
+    const m = script.match(/##\s*HASHTAGS\s*\n([\s\S]*?)(?=\n##\s|$)/i);
+    if (!m) return [];
+    // Split on commas or whitespace; strip leading '#'
+    return m[1]
+        .replace(/#/g, "")
+        .split(/[,\n\s]+/)
+        .map((t) => t.trim())
+        .filter(Boolean);
+}
+
+function firstScriptLine(script) {
+    if (!script) return "";
+    const m = script.match(/##\s*SPOKEN SCRIPT\s*\n([\s\S]*?)(?=\n##\s|$)/i);
+    const body = (m ? m[1] : script).trim();
+    return body.split(/\n\s*\n|(?<=[.!?])\s+/)[0].slice(0, 300);
+}
+
+function YouTubePublisher({ filename, titleText, hookText, scriptMarkdown }) {
+    const [status, setStatus] = React.useState(null); // { connected, channel_title, ... }
+    const [job, setJob] = React.useState(null);
+    const [connecting, setConnecting] = React.useState(false);
+
+    // Auto-generated metadata (fully auto, no user edit for now per user's choice)
+    const tags = React.useMemo(() => extractHashtags(scriptMarkdown), [scriptMarkdown]);
+    const autoTitle = React.useMemo(() => {
+        const base = (titleText || hookText || "New Short").trim();
+        return base.length > 90 ? base.slice(0, 87) + "..." : base;
+    }, [titleText, hookText]);
+    const autoDescription = React.useMemo(() => {
+        const opener = hookText ? `"${hookText}"\n\n` : "";
+        const summary = firstScriptLine(scriptMarkdown);
+        const tagLine = tags.length ? "\n\n" + tags.map((t) => "#" + t).join(" ") : "";
+        return (opener + summary + tagLine + "\n\n#Shorts").slice(0, 5000);
+    }, [hookText, scriptMarkdown, tags]);
+
+    const loadStatus = async () => {
+        try {
+            const r = await api.get("/youtube/status");
+            setStatus(r.data);
+        } catch {
+            setStatus({ connected: false });
+        }
+    };
+
+    React.useEffect(() => {
+        loadStatus();
+        const onMsg = (ev) => {
+            if (ev?.data?.type === "youtube_connected") {
+                setConnecting(false);
+                loadStatus();
+                toast.success("YouTube connected");
+            }
+        };
+        window.addEventListener("message", onMsg);
+        return () => window.removeEventListener("message", onMsg);
+    }, []);
+
+    const connect = async () => {
+        try {
+            setConnecting(true);
+            const r = await api.get("/youtube/login");
+            const url = r.data?.auth_url;
+            if (!url) throw new Error("No auth URL returned");
+            window.open(url, "yt_auth", "width=520,height=680");
+        } catch (e) {
+            setConnecting(false);
+            toast.error(e?.response?.data?.detail || e.message || "YouTube connect failed");
+        }
+    };
+
+    const disconnect = async () => {
+        try {
+            await api.post("/youtube/disconnect");
+            setStatus({ connected: false });
+            toast.success("YouTube disconnected");
+        } catch {
+            toast.error("Disconnect failed");
+        }
+    };
+
+    const publish = async () => {
+        try {
+            const r = await api.post("/youtube/publish", {
+                filename,
+                title: autoTitle,
+                description: autoDescription,
+                tags,
+                privacy: "public",
+                category_id: "22",
+            });
+            setJob({ id: r.data.id, status: "queued", title: r.data.title, tags: r.data.tags });
+            // Poll
+            for (let i = 0; i < 240; i++) {
+                await new Promise((res) => setTimeout(res, 4000));
+                try {
+                    const s = await api.get(`/youtube/publish/${r.data.id}`);
+                    setJob(s.data);
+                    if (s.data.status === "done" || s.data.status === "failed") return;
+                } catch {
+                    /* keep polling */
+                }
+            }
+        } catch (e) {
+            toast.error(e?.response?.data?.detail || "Publish failed");
+        }
+    };
+
+    return (
+        <div className="mt-8 pt-6 border-t border-white/5">
+            <div className="flex items-center gap-2 mb-3">
+                <YoutubeLogo size={20} weight="fill" style={{ color: "#FF0000" }} />
+                <span className="label-tiny">Publish to YouTube (as Short)</span>
+            </div>
+
+            {/* Connection state */}
+            <div className="tool-card mb-4">
+                {status?.connected ? (
+                    <div className="flex items-center justify-between gap-3 flex-wrap">
+                        <div className="flex items-center gap-3">
+                            {status.channel_thumbnail && (
+                                <img
+                                    src={status.channel_thumbnail}
+                                    alt=""
+                                    className="w-10 h-10 rounded-full"
+                                />
+                            )}
+                            <div>
+                                <div className="text-sm" style={{ color: "var(--text-muted)" }}>
+                                    Connected as
+                                </div>
+                                <div className="font-serif text-lg" style={{ color: "var(--accent)" }}>
+                                    {status.channel_title}
+                                </div>
+                            </div>
+                        </div>
+                        <button
+                            className="btn-ghost text-sm"
+                            onClick={disconnect}
+                            data-testid="youtube-disconnect"
+                        >
+                            Disconnect
+                        </button>
+                    </div>
+                ) : (
+                    <div className="flex items-center justify-between gap-3 flex-wrap">
+                        <div>
+                            <div className="text-sm" style={{ color: "var(--text-primary)" }}>
+                                Not connected. One-tap OAuth — Russell only asks for upload permission.
+                            </div>
+                            <div className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
+                                No YouTube creds yet? Follow the setup steps below the button.
+                            </div>
+                        </div>
+                        <button
+                            className="btn-amber"
+                            onClick={connect}
+                            disabled={connecting}
+                            data-testid="youtube-connect"
+                        >
+                            <YoutubeLogo size={14} weight="fill" className="inline mr-2" />
+                            {connecting ? "Waiting for Google..." : "Connect YouTube"}
+                        </button>
+                    </div>
+                )}
+            </div>
+
+            {/* Auto-metadata preview */}
+            {status?.connected && (
+                <div className="tool-card">
+                    <div className="label-tiny mb-2">Auto-generated metadata</div>
+                    <div className="mb-3">
+                        <div className="text-xs" style={{ color: "var(--text-muted)" }}>
+                            Title
+                        </div>
+                        <div className="font-serif text-lg" style={{ color: "var(--accent)" }}>
+                            {autoTitle} <span style={{ color: "var(--text-muted)" }}>#Shorts</span>
+                        </div>
+                    </div>
+                    <div className="mb-3">
+                        <div className="text-xs" style={{ color: "var(--text-muted)" }}>
+                            Description
+                        </div>
+                        <pre
+                            className="whitespace-pre-wrap text-sm"
+                            style={{ color: "var(--text-primary)" }}
+                        >
+                            {autoDescription}
+                        </pre>
+                    </div>
+                    <div className="mb-4">
+                        <div className="text-xs mb-1" style={{ color: "var(--text-muted)" }}>
+                            Tags
+                        </div>
+                        <div className="flex flex-wrap gap-1">
+                            {(tags.length ? tags : ["shorts"]).slice(0, 12).map((t) => (
+                                <span key={t} className="badge">
+                                    {t}
+                                </span>
+                            ))}
+                        </div>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2 items-center">
+                        <button
+                            className="btn-amber"
+                            onClick={publish}
+                            disabled={
+                                job?.status === "queued" ||
+                                job?.status === "uploading"
+                            }
+                            data-testid="youtube-publish"
+                        >
+                            {job?.status === "queued" || job?.status === "uploading" ? (
+                                <>
+                                    <ArrowClockwise
+                                        size={14}
+                                        weight="bold"
+                                        className="inline mr-2 animate-spin"
+                                    />
+                                    Uploading to YouTube... ({job?.status})
+                                </>
+                            ) : job?.status === "done" ? (
+                                "Publish again"
+                            ) : (
+                                <>
+                                    <YoutubeLogo size={14} weight="fill" className="inline mr-2" />
+                                    Publish now (public)
+                                </>
+                            )}
+                        </button>
+                        {job?.status === "done" && job.video_url && (
+                            <a
+                                href={job.video_url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="btn-ghost inline-flex items-center"
+                                data-testid="youtube-open"
+                            >
+                                <CheckCircle
+                                    size={14}
+                                    weight="fill"
+                                    className="inline mr-1"
+                                    style={{ color: "var(--accent)" }}
+                                />
+                                <span>{job.video_url.replace("https://", "")}</span>
+                                <LinkSimple size={12} weight="bold" className="ml-1" />
+                            </a>
+                        )}
+                    </div>
+
+                    {job?.status === "failed" && (
+                        <p className="text-xs mt-3" style={{ color: "#FCA5A5" }}>
+                            {job.error || "Upload failed"}
+                        </p>
+                    )}
+                </div>
+            )}
+
+            {/* Setup instructions — collapsed until user clicks */}
+            {!status?.connected && <YouTubeSetupHelp />}
+        </div>
+    );
+}
+
+function YouTubeSetupHelp() {
+    const [open, setOpen] = React.useState(false);
+    return (
+        <div className="tool-card mt-3">
+            <button
+                onClick={() => setOpen((v) => !v)}
+                className="text-sm font-medium"
+                style={{ color: "var(--accent)" }}
+                data-testid="youtube-setup-toggle"
+            >
+                {open ? "Hide setup steps" : "First time? Show me how to get Google credentials"}
+            </button>
+            {open && (
+                <ol className="text-sm mt-3 space-y-3 list-decimal pl-5" style={{ color: "var(--text-primary)" }}>
+                    <li>
+                        Go to the{" "}
+                        <a
+                            href="https://console.cloud.google.com/"
+                            target="_blank"
+                            rel="noreferrer"
+                            style={{ color: "var(--accent)" }}
+                        >
+                            Google Cloud Console
+                        </a>{" "}
+                        and create a new project called <em>Russell Studio</em>.
+                    </li>
+                    <li>
+                        Open <b>APIs &amp; Services → Library</b>, search for <b>YouTube Data API v3</b>, and click{" "}
+                        <b>Enable</b>.
+                    </li>
+                    <li>
+                        Open <b>APIs &amp; Services → OAuth consent screen</b>. Choose <b>External</b>. Fill in app
+                        name (Russell), your email, and a support email. Under <b>Test users</b>, add your own Google
+                        account (the one that owns your YouTube channel).
+                    </li>
+                    <li>
+                        Open <b>APIs &amp; Services → Credentials → Create credentials → OAuth client ID</b>. Choose{" "}
+                        <b>Web application</b>. Name it Russell. Under <b>Authorized redirect URIs</b>, paste this
+                        exact URL:
+                        <pre
+                            className="mt-2 p-2 rounded text-xs"
+                            style={{ background: "rgba(0,0,0,0.4)", color: "var(--accent)" }}
+                        >
+                            {process.env.REACT_APP_BACKEND_URL}/api/youtube/callback
+                        </pre>
+                    </li>
+                    <li>
+                        Click <b>Create</b>. Copy the <b>Client ID</b> and <b>Client Secret</b>.
+                    </li>
+                    <li>
+                        Paste both into <code>backend/.env</code> as{" "}
+                        <code>YOUTUBE_CLIENT_ID</code> and <code>YOUTUBE_CLIENT_SECRET</code>, then tell me and I&apos;ll
+                        reload the backend.
+                    </li>
+                    <li>
+                        Come back here and click <b>Connect YouTube</b> — that&apos;s it.
+                    </li>
+                </ol>
+            )}
+        </div>
+    );
+}
+

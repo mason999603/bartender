@@ -35,6 +35,7 @@ from routers import (  # noqa: E402
     tools,
     twilio_routes,
     voice,
+    youtube_routes,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -145,6 +146,7 @@ for r in (
     spotify_routes.router,
     telegram_routes.router,
     studio.router,
+    youtube_routes.router,
 ):
     api_router.include_router(r)
 
