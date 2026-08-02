@@ -129,7 +129,7 @@ User started asking "can you give me your source code so I can build an offline 
 - **Tested**: iteration 8 — 8/8 backend pytest, 100% frontend Playwright.
 
 ### Phase 8 (2026-05-31) — Multi-provider LLM rotation + action parser hardening
-- **OpenRouter is now the primary brain** with a multi-model rotation chain (deepseek-v4-flash → nvidia-nemotron-3-super-120b → moonshot-kimi-k2.6 → llama-3.3-70b → qwen3-next-80b → gemma-4-31b → gpt-oss-120b → glm-4.5-air). Each `:free` model has its own daily quota, so rotating across 8 effectively multiplies headroom. Groq 70B → 8B kept as deeper fallback when *all* OpenRouter models are throttled. Friendly 429 surfaced only when literally everything is exhausted.
+- **OpenRouter was primary brain** with a multi-model rotation chain (deepseek-v4-flash → nvidia-nemotron-3-super-120b → moonshot-kimi-k2.6 → llama-3.3-70b → qwen3-next-80b → gemma-4-31b → gpt-oss-120b → glm-4.5-air). Each `:free` model has its own daily quota, so rotating across 8 effectively multiplies headroom. Groq 70B → 8B kept as deeper fallback when *all* OpenRouter models are throttled. Friendly 429 surfaced only when literally everything is exhausted.
 - **System prompt slimmed** (saves ~3K tokens per request): substitutions only injected for currently 86'd ingredients (was injecting all 22 every time); memories/regulars capped at 15; chat history trimmed 20 → 12 messages.
 - **Action parser hardened against dumber fallback models**:
   - Regex now tolerates `[russell_actions>` (square-open Markdown corruption) in addition to proper `<russell_actions>` tags — the 8B-class models routinely emit the malformed version, every save was silently failing.
@@ -138,8 +138,34 @@ User started asking "can you give me your source code so I can build an offline 
   - Added explicit JSON-value rules to the actions system prompt forbidding placeholder strings.
 - **Live on user's Pi (2026-05-31)** — Pi voice loop now hits OpenRouter via the cloud `/api/chat` endpoint, full pipeline still on the free stack.
 
+### Phase 9 (2026-02) — Emergent AI migration + Perplexity + iOS PWA + Spotify
+- **LLM/STT/TTS unified on Emergent Universal Key.** Claude Sonnet 4.6 (brain), Whisper-1 (STT), OpenAI TTS `onyx` (Russell's voice). OpenRouter/Groq rotation and Piper removed from active path.
+- **Unhedged personality**: guardrails scrubbed from system prompt — blunt bartender voice.
+- **Perplexity Sonar-Pro** wired in for live news / real-time facts. Lightweight classifier in `core/brain.py` routes news-y queries to `core/web_search.py`.
+- **Spotify OAuth + playback control**: `core/spotify_client.py`, `routers/spotify_routes.py`. Currently-playing context injected into every chat prompt.
+- **iOS PWA**: manifest + service-worker + Apple touch icons; installable to home screen.
+- **Mobile keyboard UX**: `lib/keyboardViewport.js` + 100dvh layout — bottom nav auto-hides on keyboard open, horizontal scroll locked.
+- **Telegram webhook**: cache/404 issue resolved; still active.
+
+### Phase 10 (2026-02) — Russell's Studio (faceless AI video pipeline)
+- **New page `/studio`** in the top nav.
+- **Backend** at `/app/backend/routers/studio.py`:
+  - Phase 10a — text: `POST /studio/ideas`, `POST /studio/script`, `GET/POST/DELETE /studio/scripts`.
+  - Phase 10b — media: `POST /studio/jobs/hero-clip` (Sora 2 async), `POST /studio/jobs/image-card` (GPT-Image-1 sync), `POST /studio/jobs/voiceover` (OpenAI TTS onyx MP3), `POST /studio/jobs/assemble` (ffmpeg async), `GET /studio/jobs/{id}`, `GET /studio/jobs`, `GET /studio/media/{name}`.
+- **Studio persona**: hook-first, opinion-forward. Sharp Aussie voice, no "hey guys welcome back" openings.
+- **Video pipeline**: Sora 2 720x1280 hero clip → OpenAI onyx voiceover → optional GPT-Image-1 outro card → ffmpeg stitches into a 720x1280 H.264 MP4 with SRT-based caption overlay and a 2s outro tail. Voice duration drives final length.
+- **SDK compatibility patch**: `OpenAIVideoGeneration.SIZES` in-memory whitelist extended to include the actual Sora 2 fast sizes (720x1280 / 1280x720) which the SDK version 0.1.2 missed.
+- **Storage**: `/app/backend/generated/studio/` (env `STUDIO_MEDIA_DIR`). Jobs tracked in `db.studio_jobs`, scripts in `db.studio_scripts`.
+- **ffmpeg installed system-wide** (5.1.9).
+- **Frontend `/app/frontend/src/pages/StudioPage.jsx`**: 4-step flow — Topic → Ideas → Script (per platform, with vault save/load/delete) → Voiceover playback (Step 3) → Video Production (Step 4: Sora hero, save voiceover, optional outro card, assemble MP4 with caption).
+- **Tested (iteration_9 + iteration_10)**: 100% backend + 100% frontend. Sora 4s portrait render ~60s; ffmpeg assembly ~5-10s.
+
 ## Prioritized Backlog
 ### P1 — Next up
+- [ ] Studio Phase 3: multi-clip storyboard (2-3 Sora clips per video), auto-generate hero prompt from the script's B-ROLL section, batch-render.
+- [ ] Verify Spotify OAuth completed by the user (was authorised in-session but no confirmation).
+- [ ] ElevenLabs Aussie voice option (currently OpenAI 'onyx' American).
+- [ ] Studio Phase 4: auto-publish MP4 to TikTok / YouTube via their APIs.
 - [ ] Train custom "Hey Russell" wake word via openWakeWord Colab (instructions in `/app/pi_client/keywords/README.md`) — fully on user.
 
 ### P2 — Polish
