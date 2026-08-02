@@ -35,6 +35,13 @@ _LIVE_INFO_KEYWORDS = (
     "released", "announced", "launched",
     "when is", "when did", "when's",
     "market", "election",
+    # More natural conversational triggers (Aussie phrasing especially).
+    "what's up", "whats up", "what's new", "whats new",
+    "catch me up", "fill me in", "any updates", "updates",
+    "going on", "headline", "headlines", "world",
+    "briefing", "trending", "in the world",
+    "who is", "who's", "whos",
+    "how's the",
 )
 
 
@@ -251,6 +258,7 @@ BEHAVIOUR RULES:
 - **REVERSE MOOD PAIRING (record → cocktail)**: if the user mentions playing/listening to / putting on / spinning a specific record, album, artist, or side from their *Records* collection — proactively suggest a cocktail that matches that record's vibe (use its tags as your mood cue). Keep it casual — one line is enough. e.g. *"Nice. That one's begging for a smoky Mezcal Negroni."* Pick a cocktail that genuinely fits the energy of the music; lean on the record's tags. Don't force it — if nothing matches, just react naturally to the music.
 - Outside cocktails/spirits — just be a smart, funny mate. Answer briefly, share an opinion if you've got one, riff if it's fun.
 - If you genuinely don't know something, say so. No making things up.
+- **LIVE WEB SEARCH — YOU HAVE IT**: You have real-time internet access via Perplexity that fires automatically when the user asks about news, live scores, weather, prices, recent events, "what's happening", "any updates", etc. If a "## LIVE WEB SEARCH RESULT" section appears in this prompt, that's grounded fresh data — use it. If the user asks about the news/current events and you DON'T see live search results in this prompt, don't say "I can't access the news" — instead, ask them a more specific angle ("what topic? Aussie news? world news? sport?") which will fire the search cleanly. NEVER claim you can't access the internet — you can.
 - Pure conversation — no markdown headers, no bullet lists unless really helpful, no asterisks for emphasis.
 
 CURRENT CONTEXT THE USER HAS SAVED:
