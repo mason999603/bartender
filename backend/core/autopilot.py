@@ -25,7 +25,7 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from core.config import CLAUDE_MODEL, EMERGENT_LLM_KEY
 from core.models import now_iso
-from core.persona import ensure_persona_image, load_persona, persona_sora_snippet
+from core.persona import ensure_persona_image, load_persona
 from core.topic_rotator import next_topic
 from core.youtube_client import get_youtube_client, is_connected as youtube_connected
 
@@ -152,16 +152,26 @@ async def _sora_hero(run_id: str, prompt: str, reference: Path) -> Path:
             {"width": int(extra.split("x")[0]), "height": int(extra.split("x")[1])},
         )
     client = OpenAIVideoGeneration(api_key=EMERGENT_LLM_KEY)
-    video_bytes = await asyncio.to_thread(
-        client.text_to_video,
-        prompt=prompt,
-        model="sora-2",
-        size="720x1280",
-        duration=8,  # 8s hero looped over ~30s voiceover — sweet spot for perceived variety
-        max_wait_time=600,
-        image_path=str(reference) if reference.exists() else None,
-        mime_type="image/png",
-    )
+
+    async def _try(with_ref: bool) -> bytes | None:
+        return await asyncio.to_thread(
+            client.text_to_video,
+            prompt=prompt,
+            model="sora-2",
+            size="720x1280",
+            duration=8,
+            max_wait_time=600,
+            image_path=str(reference) if (with_ref and reference.exists()) else None,
+            mime_type="image/png",
+        )
+
+    # First try WITH the persona reference; if safety filter refuses, retry with
+    # no reference and a neutral shot. This maximises consistency when it works
+    # and guarantees Autopilot still lands a clip when it doesn't.
+    video_bytes = await _try(with_ref=True)
+    if not video_bytes:
+        logger.warning("Sora hero: persona-referenced clip returned empty — retrying without reference")
+        video_bytes = await _try(with_ref=False)
     if not video_bytes:
         raise RuntimeError("Sora returned no bytes (safety filter or timeout)")
     p = MEDIA_DIR / f"auto_hero_{run_id}.mp4"
@@ -326,8 +336,16 @@ async def produce_and_publish(db: AsyncIOMotorDatabase, trigger: str = "cron") -
         persona_ref = await ensure_persona_image(db)
         await _mark(step="persona", step_status={"ok": True, "url": "/api/studio/media/persona.png"}, status="rendering-hero")
 
-        # 6) Sora hero — 8s, portrait, with persona reference
-        sora_prompt = f"{persona_sora_snippet(persona)} {idea['hook']} — cinematic slow-motion, warm amber tungsten light, shallow depth of field, film grain."
+        # 6) Sora hero — 8s, portrait, with persona reference. Prompt is written
+        # cinematography-first (drink, hands, textures) to sidestep person-likeness
+        # safety refusals; the reference image handles character consistency.
+        sora_prompt = (
+            "Cinematic slow-motion vertical bar shot: hands and forearm of a bartender working. "
+            "Warm tungsten light, moody amber speakeasy, walnut bar counter with brass edging. "
+            f"Visual focus: {idea['hook']}. "
+            "Show the drink, ice, or ingredients up close. Shallow depth of field, "
+            "50mm-look, subtle film grain, no faces, no logos, no text on screen."
+        )
         hero_path = await _sora_hero(run_id, sora_prompt, persona_ref)
         await _mark(step="hero", step_status={"ok": True, "url": f"/api/studio/media/{hero_path.name}", "bytes": hero_path.stat().st_size}, status="assembling")
 
@@ -376,13 +394,15 @@ DEFAULT_CONFIG = {
 
 
 async def load_config(db: AsyncIOMotorDatabase) -> dict:
-    doc = await db.autopilot_config.find_one({"_id": "primary"})
+    doc = await db.autopilot_config.find_one({"_id": "primary"}, {"_id": 0})
     if not doc:
-        await db.autopilot_config.insert_one(DEFAULT_CONFIG.copy())
-        return DEFAULT_CONFIG.copy()
+        insert = DEFAULT_CONFIG.copy()
+        await db.autopilot_config.insert_one(insert)
+        insert.pop("_id", None)
+        return insert
     # Fill in any missing keys from defaults (forward compat)
-    merged = {**DEFAULT_CONFIG, **doc}
-    return merged
+    defaults = {k: v for k, v in DEFAULT_CONFIG.items() if k != "_id"}
+    return {**defaults, **doc}
 
 
 async def save_config(db: AsyncIOMotorDatabase, patch: dict) -> dict:

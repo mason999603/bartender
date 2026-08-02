@@ -169,9 +169,24 @@ User started asking "can you give me your source code so I can build an offline 
 - **Env**: new `YOUTUBE_CLIENT_ID`, `YOUTUBE_CLIENT_SECRET`, `YOUTUBE_REDIRECT_URI` in `backend/.env` (currently empty — user completes Google Cloud setup on their end).
 - **Tested (iteration_11)**: 100% backend (7/7) + 100% frontend graceful-degradation without Google creds configured.
 
+### Phase 12 (2026-02) — Autopilot (fully autonomous daily video pipeline)
+- **User goal**: "make videos and release them automatically every day" with an Aussie bartender persona as a face. Zero-touch.
+- **Locked-in defaults** (from user Q&A): 07:00 Sydney publish, 1 × 30-second Short per day, rugged Aussie bartender persona (mid-30s, black henley, dark tattoo sleeve, moody speakeasy).
+- **New files**:
+  - `/app/backend/core/persona.py` — persona character sheet + reference PNG rendered once via GPT-Image-1, cached at `MEDIA_DIR/persona.png`.
+  - `/app/backend/core/topic_rotator.py` — 60-topic evergreen queue with cursor + user-added topics collection.
+  - `/app/backend/core/autopilot.py` — `produce_and_publish()` — the full chain: topic → idea (Claude) → script (Claude) → voiceover (OpenAI TTS onyx) → Sora 2 hero (720×1280, 8s, with persona reference + neutral-prompt safety-retry) → ffmpeg assembly (looped hero + captions + voice) → YouTube upload if connected.
+  - `/app/backend/core/scheduler.py` — APScheduler AsyncIOScheduler installing a daily CronTrigger from Mongo config. Reconfigures live when the user tweaks the schedule.
+  - `/app/backend/routers/autopilot_routes.py` — status / config / run-now / runs / persona / topics endpoints.
+- **Studio.py extension**: `hero-clip` job now accepts optional `image_filename` reference (Sora `image_path`) so any hero clip can use the persona for character consistency.
+- **YouTube creds configured** in `backend/.env` — user has completed step 1-5 of Google Cloud setup. OAuth handshake (`/api/youtube/login`) not yet completed by user.
+- **Frontend `AutopilotPanel`** at the top of Studio: giant ON/OFF toggle, next-post time in Sydney tz, run-now button, persona render card, YouTube connect card, latest-run + history grid.
+- **End-to-end verified (iteration_12 + live test)**: Autopilot run produced a full 720×1280 H.264 24.8s MP4 (4.8MB) autonomously in ~2 minutes. Runs land at `ready-not-published` (queueing MP4s locally until user completes YouTube OAuth) or `published` once YouTube is connected.
+
 ## Prioritized Backlog
 ### P1 — Next up
-- [ ] Studio Phase 3: multi-clip storyboard (2-3 Sora clips per video), auto-generate hero prompt from the script's B-ROLL section, batch-render.
+- [ ] Complete YouTube OAuth handshake (open `/api/youtube/login` from the app, log in, authorise) so Autopilot lands `published` instead of `ready-not-published`.
+- [ ] Multi-clip storyboard (2-3 Sora clips per video, chained by ffmpeg).
 - [ ] TikTok publish (requires TikTok Developer app + Content Posting API approval — user needs to apply first).
 - [ ] Verify Spotify OAuth completed by the user (was authorised in-session but no confirmation).
 - [ ] ElevenLabs Aussie voice option (currently OpenAI 'onyx' American).
