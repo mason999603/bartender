@@ -331,11 +331,37 @@ def main() -> int:
     # Tell systemd we're up so the watchdog starts counting.
     sd_ready()
 
+    # Alarm watcher — polls /api/alarms/pending every 15s and fires audible alarms
+    # via TTS. Silencing is handled naturally through Russell's chat (say "shut
+    # up", "that's enough", "alarm off" — the brain parses to a silence_alarm
+    # action, backend flips the alarm inactive, the watcher stops the loop).
+    import threading as _threading
+    from alarm_watcher import AlarmWatcher
+
+    pause_wake = _threading.Event()
+
+    def _speak_alarm(msg: str) -> None:
+        speak(tts, msg, output_device=cfg.output_device)
+
+    alarm_watcher = AlarmWatcher(
+        api_base=cfg.backend_url,
+        speak_fn=_speak_alarm,
+        pause_wake_event=pause_wake,
+        stop_flag=stop_flag,
+    )
+    alarm_watcher.start()
+    logger.info("Alarm watcher thread started")
+
     # Exponential backoff for backend outages so we don't spam the network.
     net_backoff = 2.0
     NET_BACKOFF_MAX = 60.0
 
     while not stop_flag["stop"]:
+        # If an alarm is playing right now, back off wake-word listening so the
+        # mic isn't hearing itself pump out the alarm audio.
+        if pause_wake.is_set():
+            time.sleep(0.5)
+            continue
         try:
             with WakeWordListener(cfg.wake_model, cfg.wake_threshold, cfg.input_device) as listener:
                 listener.wait_for_wake()

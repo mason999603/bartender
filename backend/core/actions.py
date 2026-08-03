@@ -124,6 +124,44 @@ ACTION TYPES YOU CAN EMIT:
 9. spotify_queue — queue a track to play after the current one.
    Required: `query`. Use when user says "queue X next", "play X after this".
 
+10. set_alarm — schedule an audio alarm that fires on the Pi speaker.
+    Required: `fire_at_iso` (absolute UTC ISO 8601 timestamp — you MUST convert
+    the user's natural-language time to UTC yourself using the Sydney tz
+    provided in the LIVE CONTEXT). Optional: `message` (spoken aloud when alarm
+    fires, defaults to "Alarm"), `repeat_daily` (bool, default false — ONLY set
+    true if the user EXPLICITLY says "every day", "daily", "each morning"; a
+    plain "wake me at 7" is one-shot).
+    Examples of user intent that triggers this:
+      "wake me at 6:30" → tomorrow 6:30 Sydney → convert to UTC ISO
+      "alarm in 20 minutes with 'stock the bar'" → now+20min UTC + message
+      "wake me every day at 7am" → tomorrow 7am UTC + repeat_daily=true
+    IMPORTANT: If the user says a bare time (no date) and that time has
+    already passed today in Sydney tz, schedule for TOMORROW.
+
+11. silence_alarm — cancel/dismiss the currently-firing alarm(s).
+    No required fields. Trigger this when the user says any of: "that's enough",
+    "thats enough", "be quiet", "shut up", "alarm off", "stop the alarm",
+    "kill the alarm", "quiet russell", "enough", "cancel alarm".
+    Optional: `id` (specific alarm to silence — usually you don't need this).
+
+12. add_event — add an event to the user's iCloud calendar.
+    Required: `summary` (event title), `start_iso` (UTC ISO 8601), `end_iso` (UTC ISO 8601).
+    Optional: `description`, `location`.
+    Compute UTC ISO from the user's spoken time same way as set_alarm.
+    Trigger when the user says things like:
+      "add a dinner reservation with mum on saturday at 7"
+      "put a haircut on the calendar for tuesday 3pm"
+      "book me a shift friday 5 to close"
+      "add a birthday for Sam on the 15th"
+    If duration isn't specified, use these defaults:
+      - "dinner"/"lunch"/"meeting"/"call" → 1 hour
+      - "haircut"/"appointment"/"reservation" → 45 minutes
+      - "birthday" → all-day (start 00:00 → next day 00:00)
+      - shift → 8 hours unless user says "till" / "to X"
+      - anything else you're unsure about → 1 hour
+    NEVER auto-add events the user didn't explicitly ask for. Do not confirm-then-add
+    — just add it and tell them cheerfully in one sentence.
+
 RULES — READ CAREFULLY:
 - ONLY emit actions when the user clearly asked you to save/add/remember/86 something,
   OR when they're sharing a finished spec and you can tell they'd want it kept.
@@ -369,6 +407,64 @@ async def _run_spotify_queue(a: dict) -> dict:
     }
 
 
+# ── Alarms ───────────────────────────────────────────────────────────────────
+async def _run_set_alarm(a: dict) -> dict:
+    """Schedule an audio alarm on the Pi. Russell computes the ISO timestamp."""
+    from core.alarms import create_alarm
+
+    fire_at = (a.get("fire_at_iso") or "").strip()
+    if not fire_at:
+        raise ValueError("set_alarm requires `fire_at_iso` (UTC ISO 8601)")
+    doc = await create_alarm(
+        db,
+        fire_at_iso=fire_at,
+        message=a.get("message") or "Alarm.",
+        repeat_daily=bool(a.get("repeat_daily", False)),
+        source_channel="voice",
+    )
+    return {
+        "kind": "alarm",
+        "action": "set",
+        "id": doc["id"],
+        "fire_at": fire_at,
+        "message": doc["message"],
+        "repeat_daily": doc["repeat_daily"],
+    }
+
+
+async def _run_silence_alarm(a: dict) -> dict:
+    """Silence the currently-firing alarm(s). Repeat-daily alarms are pushed +24h."""
+    from core.alarms import silence_alarm
+
+    result = await silence_alarm(db, alarm_id=a.get("id"))
+    return {"kind": "alarm", "action": "silence", **result}
+
+
+# ── Calendar write (Russell adds events to your iCloud calendar) ─────────────
+async def _run_add_event(a: dict) -> dict:
+    from core.caldav_write import create_event as caldav_create_event, is_configured
+
+    if not await is_configured(db):
+        raise ValueError(
+            "Calendar-write not set up yet. Go to /calendar and add your Apple ID "
+            "and an app-specific password."
+        )
+    summary = (a.get("summary") or "").strip()
+    start = (a.get("start_iso") or "").strip()
+    end = (a.get("end_iso") or "").strip()
+    if not (summary and start and end):
+        raise ValueError("add_event requires summary, start_iso, end_iso")
+    ev = await caldav_create_event(
+        db,
+        summary=summary,
+        start_iso=start,
+        end_iso=end,
+        description=a.get("description") or "",
+        location=a.get("location") or "",
+    )
+    return {"kind": "calendar", "action": "add_event", **ev}
+
+
 _DISPATCH = {
     "add_cocktail": _run_add_cocktail,
     "add_collection_item": _run_add_collection_item,
@@ -382,6 +478,9 @@ _DISPATCH = {
     "spotify_previous": _run_spotify_previous,
     "spotify_volume": _run_spotify_volume,
     "spotify_queue": _run_spotify_queue,
+    "set_alarm": _run_set_alarm,
+    "silence_alarm": _run_silence_alarm,
+    "add_event": _run_add_event,
 }
 
 

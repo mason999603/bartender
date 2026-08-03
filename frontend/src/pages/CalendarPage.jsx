@@ -10,6 +10,8 @@ import {
     Briefcase,
     House,
     Warning,
+    PencilSimple,
+    CheckCircle,
 } from "@phosphor-icons/react";
 
 const CATEGORY_STYLES = {
@@ -65,6 +67,51 @@ export default function CalendarPage() {
     const [newUrl, setNewUrl] = useState("");
     const [newIsWork, setNewIsWork] = useState(false);
 
+    // CalDAV write config
+    const [caldavStatus, setCaldavStatus] = useState({ configured: false });
+    const [showCaldav, setShowCaldav] = useState(false);
+    const [caldavAppleId, setCaldavAppleId] = useState("");
+    const [caldavPassword, setCaldavPassword] = useState("");
+    const [caldavCalendarName, setCaldavCalendarName] = useState("");
+    const [caldavSaving, setCaldavSaving] = useState(false);
+
+    const loadCaldavStatus = async () => {
+        try {
+            const r = await api.get("/calendar/write/status");
+            setCaldavStatus(r.data || { configured: false });
+            if (r.data?.apple_id) setCaldavAppleId(r.data.apple_id);
+            if (r.data?.calendar_name) setCaldavCalendarName(r.data.calendar_name);
+        } catch {
+            /* non-fatal */
+        }
+    };
+
+    const saveCaldav = async () => {
+        if (!caldavAppleId.trim() || !caldavPassword.trim()) {
+            return toast.error("Apple ID + app-specific password required");
+        }
+        setCaldavSaving(true);
+        try {
+            const r = await api.post("/calendar/write/config", {
+                apple_id: caldavAppleId.trim(),
+                app_specific_password: caldavPassword.trim(),
+                calendar_name: caldavCalendarName.trim() || null,
+            });
+            toast.success(
+                `Connected — ${(r.data?.calendars || []).length} calendar${
+                    (r.data?.calendars || []).length === 1 ? "" : "s"
+                } found`
+            );
+            setCaldavPassword("");
+            setShowCaldav(false);
+            loadCaldavStatus();
+        } catch (e) {
+            toast.error(e?.response?.data?.detail || "Setup failed — check the password");
+        } finally {
+            setCaldavSaving(false);
+        }
+    };
+
     const load = async () => {
         try {
             const r = await api.get(`/calendar/upcoming?days=${days}`);
@@ -77,6 +124,7 @@ export default function CalendarPage() {
 
     useEffect(() => {
         load();
+        loadCaldavStatus();
     }, [days]);
 
     const refresh = async () => {
@@ -131,6 +179,97 @@ export default function CalendarPage() {
                 title="What's on the roster"
                 subtitle="Russell reads your iCloud calendars and ranks what actually matters."
             />
+
+            {/* ── CalDAV write (Russell can ADD events by voice) ────── */}
+            <section className="mb-8" data-testid="caldav-write-section">
+                <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                        <PencilSimple size={18} weight="fill" style={{ color: "var(--accent)" }} />
+                        <span className="label-tiny">Russell can add events</span>
+                        {caldavStatus.configured && (
+                            <span
+                                className="text-xs inline-flex items-center gap-1 ml-1"
+                                style={{ color: "#86EFAC" }}
+                                data-testid="caldav-connected-badge"
+                            >
+                                <CheckCircle size={12} weight="fill" />
+                                Connected as {caldavStatus.apple_id}
+                            </span>
+                        )}
+                    </div>
+                    <button
+                        className="btn-ghost text-sm"
+                        onClick={() => setShowCaldav((v) => !v)}
+                        data-testid="caldav-toggle"
+                    >
+                        {caldavStatus.configured ? "Update" : "Set up"}
+                    </button>
+                </div>
+
+                {!caldavStatus.configured && !showCaldav && (
+                    <div className="tool-card text-sm" style={{ color: "var(--text-muted)" }}>
+                        Give Russell an Apple ID + app-specific password and he can add events by voice
+                        (&quot;add a dinner reservation with mum saturday at 7&quot;).
+                    </div>
+                )}
+
+                {showCaldav && (
+                    <div className="tool-card" data-testid="caldav-form">
+                        <input
+                            className="input-dark w-full mb-2"
+                            placeholder="Apple ID email (e.g. you@icloud.com)"
+                            value={caldavAppleId}
+                            onChange={(e) => setCaldavAppleId(e.target.value)}
+                            data-testid="caldav-apple-id"
+                        />
+                        <input
+                            className="input-dark w-full mb-2"
+                            type="password"
+                            placeholder="App-specific password (xxxx-xxxx-xxxx-xxxx)"
+                            value={caldavPassword}
+                            onChange={(e) => setCaldavPassword(e.target.value)}
+                            data-testid="caldav-password"
+                        />
+                        <input
+                            className="input-dark w-full mb-3"
+                            placeholder="Calendar name (leave blank for default)"
+                            value={caldavCalendarName}
+                            onChange={(e) => setCaldavCalendarName(e.target.value)}
+                            data-testid="caldav-calendar-name"
+                        />
+                        <div className="flex gap-2">
+                            <button
+                                className="btn-amber text-sm"
+                                onClick={saveCaldav}
+                                disabled={caldavSaving}
+                                data-testid="caldav-save"
+                            >
+                                {caldavSaving ? "Verifying…" : "Save & verify"}
+                            </button>
+                            <button
+                                className="btn-ghost text-sm"
+                                onClick={() => setShowCaldav(false)}
+                                data-testid="caldav-cancel"
+                            >
+                                Cancel
+                            </button>
+                        </div>
+                        <div className="text-xs mt-3" style={{ color: "var(--text-muted)" }}>
+                            <b>Where do I get an app-specific password?</b>{" "}
+                            <a
+                                href="https://appleid.apple.com/account/manage"
+                                target="_blank"
+                                rel="noreferrer"
+                                style={{ color: "var(--accent)" }}
+                            >
+                                appleid.apple.com
+                            </a>{" "}
+                            → Sign-In &amp; Security → App-Specific Passwords → Generate. Label it
+                            &quot;Russell&quot;. This never leaves your database.
+                        </div>
+                    </div>
+                )}
+            </section>
 
             {/* ── Sources ─────────────────────────────────────────── */}
             <section className="mb-8">

@@ -11,6 +11,13 @@ from pydantic import BaseModel, Field
 
 from core.calendar_analyzer import briefing_block, rank_upcoming
 from core.calendar_client import fetch_and_store
+from core.caldav_write import (
+    create_event as caldav_create_event,
+    is_configured as caldav_is_configured,
+    list_calendar_names as caldav_list_calendar_names,
+    load_config as caldav_load_config,
+    save_config as caldav_save_config,
+)
 from core.db import db
 from core.models import now_iso
 
@@ -122,3 +129,67 @@ async def briefing(days: int = 7):
     """Plain-text ranked briefing. Used by the brain when the user asks 'what's on'."""
     payload = await upcoming(days=days, limit=25)
     return {"text": briefing_block(payload["events"])}
+
+
+# ── CalDAV write (Russell adds events to your calendar) ──────────────────────
+class CaldavConfigIn(BaseModel):
+    apple_id: str = Field(min_length=3)
+    app_specific_password: str = Field(min_length=8)
+    calendar_name: str | None = None  # None = write to default calendar
+
+
+class CalendarEventIn(BaseModel):
+    summary: str = Field(min_length=1)
+    start_iso: str
+    end_iso: str
+    description: str = ""
+    location: str = ""
+
+
+@router.get("/write/status")
+async def caldav_status():
+    doc = await caldav_load_config(db)
+    if not doc:
+        return {"configured": False}
+    return {
+        "configured": True,
+        "apple_id": doc.get("apple_id"),
+        "calendar_name": doc.get("calendar_name"),
+    }
+
+
+@router.post("/write/config")
+async def caldav_configure(req: CaldavConfigIn):
+    """Persist the Apple ID + app-specific password. Verifies by listing calendars."""
+    doc = await caldav_save_config(db, req.apple_id, req.app_specific_password, req.calendar_name)
+    try:
+        cals = await caldav_list_calendar_names(db)
+    except Exception as e:
+        # Save was accepted, but the creds don't work. Report cleanly.
+        raise HTTPException(400, f"Credentials rejected by iCloud: {e}")
+    return {"ok": True, "apple_id": doc["apple_id"], "calendars": cals}
+
+
+@router.get("/write/calendars")
+async def caldav_calendars():
+    if not await caldav_is_configured(db):
+        raise HTTPException(400, "CalDAV not configured")
+    return await caldav_list_calendar_names(db)
+
+
+@router.post("/write/event")
+async def caldav_write_event(req: CalendarEventIn):
+    if not await caldav_is_configured(db):
+        raise HTTPException(400, "CalDAV not configured — set Apple ID + app-specific password first")
+    try:
+        return await caldav_create_event(
+            db,
+            summary=req.summary,
+            start_iso=req.start_iso,
+            end_iso=req.end_iso,
+            description=req.description,
+            location=req.location,
+        )
+    except Exception as e:
+        raise HTTPException(500, f"CalDAV write failed: {e}")
+

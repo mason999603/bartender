@@ -20,6 +20,7 @@ from core.models import now_iso  # noqa: E402
 from seed_data import CLASH_RULES, COCKTAILS, INGREDIENTS, SUBSTITUTIONS  # noqa: E402
 
 from routers import (  # noqa: E402
+    alarm_routes,
     chat,
     cocktails,
     collections,
@@ -192,6 +193,7 @@ for r in (
     youtube_routes.router,
     autopilot_routes.router,
     calendar_routes.router,
+    alarm_routes.router,
 ):
     api_router.include_router(r)
 

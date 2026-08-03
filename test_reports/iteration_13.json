@@ -1,0 +1,44 @@
+{
+  "summary": "Tested Russell's alarm system (backend CRUD + repeat_daily + LLM-driven creation) and CalDAV write config (status/config/event endpoints + frontend CalendarPage UI). 13 backend tests passed, 1 skipped (add_event failure relay — LLM did not emit add_event action in this run so failure relay code path not exercised end-to-end via chat; chat pipeline itself worked and the code path is straightforward). All frontend flows for the new CalDAV write section passed, and the existing Calendar page regressions (sources, refresh, add-calendar toggle, day-range buttons, Hapkido training event) all still work. Discovered one real bug: CalDAV config with invalid creds is persisted to the DB before verification, leaving status endpoint reporting configured=true even though iCloud rejected the credentials.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "POST /api/calendar/write/config",
+        "issue": "Fake/invalid credentials are persisted to db.caldav_config BEFORE the verification call (list_calendar_names) fires. When iCloud rejects the creds and the endpoint returns 400, the bad config remains in the DB and GET /api/calendar/write/status subsequently returns {configured: true, apple_id: <bad>}. Fix: in calendar_routes.caldav_configure, either (a) verify creds FIRST (call list_calendar_names via a temporary client) then save_config on success, or (b) wrap save + verify in try/except and delete the persisted doc on verification failure. This also means the 'failure relay' guarantee for add_event is weakened — Russell will happily attempt add_event with poisoned creds and get a runtime 500."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_alarms_caldav.py",
+    "/app/test_reports/pytest/alarms_caldav.xml"
+  ],
+  "action_items": [
+    "Fix POST /api/calendar/write/config to not persist unverified credentials — verify first, then save; or roll back on verification failure. Currently a user typing the wrong app-specific password leaves the app in a broken 'configured' state that they cannot un-configure from the UI (there is no 'Disconnect' button either)."
+  ],
+  "critical_code_review_comments": [
+    "calendar_routes.caldav_configure persists creds before validation → orphaned bad-config state (see minor issue above).",
+    "There is no UI action to CLEAR/DISCONNECT the CalDAV config. If bad creds get persisted (or the user wants to switch Apple IDs), they can only fix via DB. Consider a Disconnect button (DELETE /api/calendar/write/config) alongside Update.",
+    "caldav_write.py stores the app-specific password in plaintext in Mongo. Acknowledged in the module docstring as 'local-only deployment', but worth flagging.",
+    "brain.py failure-relay only reports failed[0].error — if multiple actions were emitted and >1 failed, only the first is surfaced. Fine for MVP.",
+    "alarms.py silence_alarm's 'silence all firing' branch filters by fire_at_iso <= now, but does not exclude alarms already fired (fired_at set). Not a bug per-se because active=true is the primary guard, but worth a comment."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_alarms_caldav.py (created)"
+  ],
+  "success_rate": {
+    "backend": "100% (13/13 executed, 1 skipped due to LLM not emitting add_event action — no failures)",
+    "frontend": "100% (all data-testids present, all interactions functional)"
+  },
+  "test_credentials": "None used — CalDAV was tested only with fake creds (TEST_fake@icloud.com) which iCloud correctly rejected with 400.",
+  "seed_data_creation": "None. Test alarms created during pytest are auto-deleted in module teardown. Fake CalDAV config left behind by the config-persistence bug was cleaned up manually.",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "The alarm system is solid — CRUD, pending, silence (both specific and bulk), repeat_daily reschedule, and LLM-driven creation via /api/chat all pass. The failure-relay test for add_event was inconclusive because the LLM (in this run) responded conversationally without emitting an add_event action tag when CalDAV was unconfigured. To exercise brain.py:515-525 directly, either (a) hit /api/chat with a very explicit prompt and inspect response.actions[] for add_event with ok=false, or (b) unit-test parse_and_execute + the failure-relay block in isolation. The CalDAV config-persistence bug (bad creds stay in DB) is the main open item — main agent should fix and retest.",
+  "rca of the issue": "POST /api/calendar/write/config in calendar_routes.py calls save_config(db, ...) unconditionally, THEN tries list_calendar_names which fails for bad creds. save_config uses replace_one(upsert=True) so the bad creds overwrite any prior config. The HTTPException(400) then bubbles up but the DB write already happened. Reproduction: POST fake creds → 400 'Credentials rejected by iCloud' → immediately GET /api/calendar/write/status → returns configured=true with the fake apple_id. Mitigation: reorder to verify-then-save, or wrap in try/except and delete the doc on verification failure."
+}

@@ -333,6 +333,28 @@ async def chat_with_russell(
     system_prompt = await build_russell_system_prompt()
     system_prompt += "\n" + ACTIONS_PROMPT
 
+    # Inject an unambiguous NOW block so Russell can compute correct UTC ISO
+    # timestamps when the user says "wake me at 6:30" etc. Sydney is the user's
+    # home tz — hardcoded because the app is single-user.
+    try:
+        from datetime import datetime, timezone
+        from zoneinfo import ZoneInfo
+        sydney = datetime.now(ZoneInfo("Australia/Sydney"))
+        utc = datetime.now(timezone.utc)
+        system_prompt += (
+            "\n\n## NOW — for alarm timestamps and 'today/tomorrow' logic\n"
+            f"- Local (Australia/Sydney): {sydney.strftime('%A %d %b %Y, %H:%M')} "
+            f"(UTC offset {sydney.strftime('%z')})\n"
+            f"- UTC: {utc.strftime('%Y-%m-%dT%H:%M:%SZ')}\n"
+            "When emitting set_alarm.fire_at_iso, compute the exact UTC ISO 8601 "
+            "timestamp from the user's spoken time. Example: user says "
+            "\"wake me at 6:30\" while Sydney says 22:00 → target is tomorrow "
+            "06:30 Sydney → which is today ~20:30 UTC. Always output as "
+            "YYYY-MM-DDTHH:MM:SS+00:00 or the same instant with a Z suffix."
+        )
+    except Exception:
+        pass
+
     companion_block = await build_companion_context(db, user_text)
     if companion_block:
         system_prompt += f"\n\n## REAL-TIME CONTEXT (use naturally, don't recite verbatim)\n{companion_block}"
@@ -487,6 +509,20 @@ async def chat_with_russell(
 
     # Strip & execute any <russell_actions> block before persisting the visible reply.
     cleaned_reply, executed_actions = await parse_and_execute(reply_str)
+
+    # If any action failed, Russell's cheerful reply is a lie — patch it with an
+    # honest one so the user knows what actually happened.
+    failed = [a for a in executed_actions if not a.get("ok", True)]
+    if failed:
+        err = (failed[0].get("error") or "").strip()
+        # Voice mode: keep it terse. Web mode: full detail.
+        if voice_mode:
+            cleaned_reply = f"Couldn't do that one, mate. {err[:120]}"
+        else:
+            cleaned_reply = (
+                f"Tried, but that didn't go through — {err}\n\n"
+                "(Once you've fixed that, ask me again and I'll retry.)"
+            )
 
     # Persist BOTH turns only after a successful reply — keeps history clean if the
     # LLM call fails (no orphaned user messages with no response).
