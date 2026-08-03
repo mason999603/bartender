@@ -139,6 +139,33 @@ async def start_autopilot_scheduler():
         logger.exception("Failed to start autopilot scheduler")
 
 
+@app.on_event("startup")
+async def ensure_ffmpeg():
+    """Emergent preview containers cycle and wipe apt packages. Studio's ffmpeg
+    assembly needs ffmpeg + ffprobe on PATH — install them if missing.
+
+    apt install here is idempotent and fast (~5s if already installed).
+    """
+    import asyncio, shutil
+    if shutil.which("ffmpeg") and shutil.which("ffprobe"):
+        return
+    logger.warning("ffmpeg not on PATH — installing (apt) so Studio assembly works")
+
+    async def _install():
+        proc = await asyncio.create_subprocess_shell(
+            "apt-get update -qq && apt-get install -y --no-install-recommends ffmpeg",
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        out, err = await proc.communicate()
+        if proc.returncode == 0:
+            logger.info("ffmpeg installed successfully")
+        else:
+            logger.error("ffmpeg install failed: %s", (err or b"").decode()[-500:])
+
+    # Don't block startup — install in background
+    asyncio.create_task(_install())
+
+
 @api_router.get("/")
 async def root():
     return {"app": "Russell", "status": "behind the stick"}
