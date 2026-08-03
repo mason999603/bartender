@@ -132,6 +132,38 @@ def load_config() -> Config:
 # ============================================================
 # Cloud brain client
 # ============================================================
+# Emergent preview containers recycle every 1-2 hours; the endpoint returns
+# 404/502 for ~5-10s during rollover. Retry those transient failures silently
+# so the user doesn't lose an interaction whenever k8s decides to shuffle pods.
+_TRANSIENT_STATUS = {404, 502, 503, 504}
+_RETRY_WAITS = (2, 5, 10)
+
+
+def _post_with_retry(url: str, **kwargs):
+    last_err = None
+    for i, wait in enumerate((0,) + _RETRY_WAITS):
+        if wait:
+            time.sleep(wait)
+        try:
+            r = requests.post(url, **kwargs)
+            if r.status_code in _TRANSIENT_STATUS and i < len(_RETRY_WAITS):
+                last_err = requests.HTTPError(
+                    f"{r.status_code} transient — retry {i+1}/{len(_RETRY_WAITS)}",
+                    response=r,
+                )
+                logger.warning("Backend %s — waiting %ss and retrying", r.status_code, _RETRY_WAITS[i])
+                continue
+            return r
+        except (requests.ConnectionError, requests.Timeout) as e:
+            last_err = e
+            if i < len(_RETRY_WAITS):
+                logger.warning("Backend unreachable (%s) — retry %s/%s", e, i + 1, len(_RETRY_WAITS))
+                continue
+            raise
+    if last_err:
+        raise last_err
+
+
 class RussellAPI:
     def __init__(self, base_url: str, session_id: str):
         self.base = base_url
@@ -139,7 +171,7 @@ class RussellAPI:
 
     def transcribe(self, wav_bytes: bytes) -> str:
         files = {"audio": ("voice.wav", wav_bytes, "audio/wav")}
-        r = requests.post(f"{self.base}/api/voice/transcribe", files=files, timeout=30)
+        r = _post_with_retry(f"{self.base}/api/voice/transcribe", files=files, timeout=30)
         r.raise_for_status()
         return (r.json().get("text") or "").strip()
 
@@ -147,7 +179,7 @@ class RussellAPI:
         payload = {"session_id": self.session_id, "message": text, "voice_mode": True}
         # 90s cap — voice mode uses Haiku which is much faster than Sonnet,
         # so we don't need the 3-min budget of the old rotating-provider path.
-        r = requests.post(f"{self.base}/api/chat", json=payload, timeout=90)
+        r = _post_with_retry(f"{self.base}/api/chat", json=payload, timeout=90)
         r.raise_for_status()
         return (r.json().get("reply") or "").strip()
 
