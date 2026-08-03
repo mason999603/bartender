@@ -32,6 +32,35 @@ load_dotenv(ROOT / ".env")
 
 from audio_io import record_until_silence, play_wav_file, find_working_input_device  # noqa: E402
 from greetings import pick_greeting  # noqa: E402
+
+# systemd Type=notify integration — proves liveness to the WatchdogSec timer.
+# We fall back to no-ops when running outside systemd (dev machines etc).
+try:
+    import systemd.daemon as _sd  # noqa: E402
+
+    def sd_ready() -> None:
+        try:
+            _sd.notify("READY=1")
+        except Exception:
+            pass
+
+    def sd_watchdog() -> None:
+        try:
+            _sd.notify("WATCHDOG=1")
+        except Exception:
+            pass
+
+    def sd_stopping() -> None:
+        try:
+            _sd.notify("STOPPING=1")
+        except Exception:
+            pass
+
+except ImportError:
+    def sd_ready() -> None: pass
+    def sd_watchdog() -> None: pass
+    def sd_stopping() -> None: pass
+
 # TTS backend: default 'cloud' (OpenAI TTS via backend), 'piper' for legacy offline mode.
 _TTS_BACKEND = (os.environ.get("TTS_BACKEND") or "cloud").strip().lower()
 if _TTS_BACKEND == "piper":
@@ -214,9 +243,21 @@ class WakeWordListener:
         return np.clip(resampled * 32768.0, -32768, 32767).astype(np.int16)
 
     def wait_for_wake(self) -> None:
-        """Blocks until any loaded wake-word's score crosses the threshold."""
+        """Blocks until any loaded wake-word's score crosses the threshold.
+
+        Pings systemd's watchdog every ~30s so a hung audio stream can be
+        detected and force-restarted. If the RawInputStream raises mid-listen
+        (e.g. USB mic unplug), we tear down and re-scan devices from scratch
+        rather than dying — Russell must survive the bar setup being messed with.
+        """
+        last_wd = time.monotonic()
         while True:
-            data, _ = self.stream.read(self.device_frame_len)
+            try:
+                data, _ = self.stream.read(self.device_frame_len)
+            except Exception as e:
+                logger.warning("Audio stream error while listening: %s — reopening", e)
+                # Tear down; caller's `with` block will reopen with a fresh scan.
+                raise
             audio = np.frombuffer(bytes(data), dtype=np.int16)
             audio_16k = self._to_16k_mono(audio)
             predictions = self.model.predict(audio_16k)
@@ -224,6 +265,11 @@ class WakeWordListener:
                 if score >= self.threshold:
                     logger.debug(f"wake fired: {_name}={score:.3f}")
                     return
+            # Feed systemd every ~30s
+            now = time.monotonic()
+            if now - last_wd >= 30:
+                sd_watchdog()
+                last_wd = now
 
 
 # ============================================================
@@ -283,6 +329,13 @@ def main() -> int:
     except Exception:
         logger.exception("TTS warm-up failed — continuing anyway")
 
+    # Tell systemd we're up so the watchdog starts counting.
+    sd_ready()
+
+    # Exponential backoff for backend outages so we don't spam the network.
+    net_backoff = 2.0
+    NET_BACKOFF_MAX = 60.0
+
     while not stop_flag["stop"]:
         try:
             with WakeWordListener(cfg.wake_model, cfg.wake_threshold, cfg.input_device) as listener:
@@ -315,24 +368,55 @@ def main() -> int:
             # Speak it
             speak(tts, reply, output_device=cfg.output_device)
 
-        except requests.HTTPError:
-            logger.exception("Backend HTTP error")
-            try:
-                speak(tts, "Bit of trouble reaching the brain, mate. Try me again.", output_device=cfg.output_device)
-            except Exception:
-                pass
+            # A full successful cycle resets the network backoff.
+            net_backoff = 2.0
+
+        except requests.HTTPError as e:
+            status = getattr(e.response, "status_code", 0)
+            # 429 = LLM budget cap / rate limit. Log-only, no spoken alert —
+            # the user already knows and doesn't need Russell announcing it
+            # every wake-word activation.
+            if status == 429:
+                logger.warning("Backend 429 (budget/rate cap) — staying quiet, will retry next wake")
+            # 5xx = temporary server issue. Speak a short note, then backoff.
+            elif 500 <= status < 600:
+                logger.exception("Backend %s — brief pause then retry", status)
+                try:
+                    speak(tts, "Brain's having a moment — try me again.", output_device=cfg.output_device)
+                except Exception:
+                    pass
+                time.sleep(net_backoff)
+                net_backoff = min(NET_BACKOFF_MAX, net_backoff * 2)
+            else:
+                logger.exception("Backend HTTP %s", status)
+                try:
+                    speak(tts, "Bit of trouble reaching the brain, mate. Try me again.", output_device=cfg.output_device)
+                except Exception:
+                    pass
+        except requests.Timeout:
+            logger.warning("Backend timeout — Russell's taking too long to think")
+            # Timeouts are common when Claude is busy — don't scare the user.
+            # Backoff and try again next wake word.
+            time.sleep(net_backoff)
+            net_backoff = min(NET_BACKOFF_MAX, net_backoff * 2)
         except requests.RequestException:
-            logger.exception("Network error")
+            # Network / DNS / connection refused — Wi-Fi drop, backend down, etc.
+            logger.exception("Network error — backoff %ds", int(net_backoff))
             try:
                 speak(tts, "I'm offline at the moment. Check the wi-fi.", output_device=cfg.output_device)
             except Exception:
                 pass
+            time.sleep(net_backoff)
+            net_backoff = min(NET_BACKOFF_MAX, net_backoff * 2)
         except KeyboardInterrupt:
             stop_flag["stop"] = True
         except Exception:
-            logger.exception("Unexpected error — pausing 2s before resuming")
-            time.sleep(2)
+            # Anything else (audio device error, model glitch, ...) — pause briefly
+            # so systemd's WatchdogSec still gets a pulse via the next loop.
+            logger.exception("Unexpected error — pausing 3s before resuming")
+            time.sleep(3)
 
+    sd_stopping()
     logger.info("Russell Pi client stopped.")
     return 0
 

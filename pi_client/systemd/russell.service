@@ -1,19 +1,48 @@
 [Unit]
-Description=Russell — AI Bartender voice client
+Description=Russell — AI Bartender voice client (24/7)
+Documentation=https://github.com/yourname/russell
+# Wait until network + audio stack are fully up before we start.
 After=network-online.target sound.target
 Wants=network-online.target
+# If systemd-networkd is up, we treat WiFi flap gracefully via retry in-code.
 
 [Service]
-Type=simple
+Type=notify
+NotifyAccess=main
 User=pi
 Group=audio
 WorkingDirectory=/opt/russell/pi_client
 Environment="PATH=/opt/russell/pi_client/venv/bin:/usr/bin:/bin"
+Environment="PYTHONUNBUFFERED=1"
 ExecStart=/opt/russell/pi_client/venv/bin/python /opt/russell/pi_client/russell_pi_client.py
-Restart=on-failure
-RestartSec=5
+
+# ── 24/7 reliability ────────────────────────────────────────────────────────
+# Always restart, no matter how we exited (clean shutdown, crash, OOM, etc).
+Restart=always
+RestartSec=10
+# If Russell dies more than 10 times within 5 minutes, we're in a boot loop —
+# stop trying and let the user SSH in to inspect. This prevents thrashing.
+StartLimitIntervalSec=300
+StartLimitBurst=10
+
+# Watchdog — Russell pings systemd every ~30s from the wake-word loop. If he
+# stops pinging for 120s (e.g. PortAudio deadlock, mic unplug), systemd kills
+# and restarts the process automatically.
+WatchdogSec=120
+
+# Kill the whole process group on stop so no orphaned audio streams hang around.
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=15
+
+# Logging — journald handles rotation automatically. View with:
+#   sudo journalctl -u russell -f
 StandardOutput=journal
 StandardError=journal
+
+# Give Russell a moment on boot in case Wi-Fi hasn't associated yet.
+# The Python code also has its own network-retry loop.
+ExecStartPre=/bin/sleep 5
 
 [Install]
 WantedBy=multi-user.target

@@ -120,18 +120,54 @@ Now say **"Hey Russell"** — wait for the (silent) ack — then ask anything.
 
 ---
 
-## Autostart on boot (systemd)
+## Autostart on boot (systemd) — 24/7 setup
+
+**On the Pi**, from `/opt/russell/pi_client`:
 
 ```bash
+# 1) Install the systemd Python binding (once)
+sudo apt install -y libsystemd-dev
+source venv/bin/activate && pip install systemd-python
+
+# 2) Install the service
 sudo cp systemd/russell.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable russell.service
+sudo systemctl enable russell.service      # survives reboot / power loss
 sudo systemctl start russell.service
 ```
 
-Logs:
+The unit is configured for real 24/7 operation:
+
+| Behaviour | Value | Why |
+|---|---|---|
+| `Restart=always` | any exit → restart in 10s | survives crashes, OOM, clean exits |
+| `WatchdogSec=120` | Russell pings every 30s | hung mic/PortAudio → auto force-restart |
+| `StartLimitBurst=10 / 300s` | max 10 restarts / 5min | avoids boot loops on truly broken config |
+| `After=network-online.target` | delays start | until Wi-Fi is actually associated |
+| `ExecStartPre=sleep 5` | extra grace | for slow USB mic re-enumeration on boot |
+
+**Verify it's running as expected:**
+
 ```bash
-sudo journalctl -u russell -f
+sudo systemctl status russell         # should show `active (running)` + `Notified: watchdog=1s ago`
+sudo journalctl -u russell -f         # live logs
+sudo systemctl restart russell        # manual restart when you push code changes
+```
+
+**Auto-recovery you get for free:**
+
+- Pi power cycles overnight → Russell comes up on boot.
+- Wi-Fi drops for 20 minutes → Russell logs, backs off exponentially (2s → 60s max), stays quiet on the speaker so you don't hear repeated "I'm offline" nagging, resumes the moment Wi-Fi returns.
+- Backend hits budget cap (429) → Russell logs it and goes back to listening — no spoken alerts.
+- USB mic unplugged mid-conversation → wake-word listener errors → outer loop re-scans devices via `find_working_input_device` and reopens the stream.
+- Python process hangs → watchdog fires at 120s, systemd force-kills and restarts.
+
+**View watchdog activity:**
+
+```bash
+# You should see one of these every ~30s in journalctl:
+#   russell.pi: pinging systemd watchdog
+sudo journalctl -u russell --since "5 min ago" | grep -c "wake fired\|watchdog"
 ```
 
 ---

@@ -5,6 +5,12 @@
 requests>=2.31.0
 python-dotenv>=1.0.0
 
+# systemd Type=notify integration for the 24/7 watchdog.
+# On Raspberry Pi OS you MUST install the system dep first:
+#   sudo apt install -y libsystemd-dev
+systemd-python>=234
+
+
 # Audio I/O (PortAudio binding — easier to install on Pi than pyaudio)
 # On Raspberry Pi OS: sudo apt install -y libportaudio2 portaudio19-dev
 sounddevice>=0.4.6
