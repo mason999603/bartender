@@ -10,7 +10,9 @@ router = APIRouter(tags=["chat"])
 
 @router.post("/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest):
-    reply, actions = await chat_with_russell(req.session_id, req.message, channel="web")
+    reply, actions = await chat_with_russell(
+        req.session_id, req.message, channel="web", voice_mode=req.voice_mode
+    )
     return ChatResponse(
         session_id=req.session_id,
         user_message=req.message,

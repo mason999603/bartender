@@ -110,7 +110,7 @@ def load_config() -> Config:
     c.input_device = _int_or_none(os.environ.get("INPUT_DEVICE_INDEX"))
     c.output_device = _int_or_none(os.environ.get("OUTPUT_DEVICE_INDEX"))
     c.vad_threshold = float(os.environ.get("VAD_SILENCE_THRESHOLD") or 0.015)
-    c.vad_silence_seconds = float(os.environ.get("VAD_SILENCE_SECONDS") or 1.4)
+    c.vad_silence_seconds = float(os.environ.get("VAD_SILENCE_SECONDS") or 0.7)
     c.vad_max_seconds = float(os.environ.get("VAD_MAX_RECORD_SECONDS") or 30.0)
     c.piper_voice_path = os.environ.get("PIPER_VOICE_PATH") or "./voices/en_GB-alan-medium.onnx"
     c.wake_ack_sound = (os.environ.get("WAKE_ACK_SOUND") or "").strip() or None
@@ -144,11 +144,10 @@ class RussellAPI:
         return (r.json().get("text") or "").strip()
 
     def chat(self, text: str) -> str:
-        payload = {"session_id": self.session_id, "message": text}
-        # Generous 3-min timeout: the backend's OpenRouter chain rotates through up
-        # to 8 free models when the top ones are throttled. Each attempt can take
-        # a few seconds. Better to wait than to drop the conversation mid-flight.
-        r = requests.post(f"{self.base}/api/chat", json=payload, timeout=180)
+        payload = {"session_id": self.session_id, "message": text, "voice_mode": True}
+        # 90s cap — voice mode uses Haiku which is much faster than Sonnet,
+        # so we don't need the 3-min budget of the old rotating-provider path.
+        r = requests.post(f"{self.base}/api/chat", json=payload, timeout=90)
         r.raise_for_status()
         return (r.json().get("reply") or "").strip()
 

@@ -14,6 +14,9 @@ def now_iso() -> str:
 class ChatRequest(BaseModel):
     session_id: str = "main"
     message: str
+    # Set true on the Pi voice client so the backend routes to Claude Haiku for
+    # ~3x faster replies + injects a "keep it short, this is spoken aloud" hint.
+    voice_mode: bool = False
 
 
 class ChatResponse(BaseModel):

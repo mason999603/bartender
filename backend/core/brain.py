@@ -291,8 +291,13 @@ Reference these naturally when relevant. Don't recite them verbatim — use them
 """
 
 
-async def chat_with_russell(session_id: str, user_text: str, channel: str = "web") -> tuple[str, list[dict]]:
+async def chat_with_russell(
+    session_id: str, user_text: str, channel: str = "web", voice_mode: bool = False
+) -> tuple[str, list[dict]]:
     """Run a message through Russell's brain. Persists turns. `channel` adjusts reply style.
+
+    `voice_mode=True` (used by the Pi voice client) swaps Sonnet for Haiku for
+    ~3x lower latency and injects a brevity/spoken hint into the prompt.
 
     Returns (cleaned_reply, executed_actions). Actions are mutations Russell performed on
     user data (saving cocktails, adding to collections, etc.) — see core/actions.py.
@@ -371,8 +376,10 @@ async def chat_with_russell(session_id: str, user_text: str, channel: str = "web
         logger.exception("Web search failed — falling back to Claude's own knowledge")
 
     # ──────────────────────────────────────────────────────────────────
-    # LLM call — Claude Sonnet 4.6 via Emergent universal key
+    # LLM call — Claude via Emergent universal key.
+    # Voice mode swaps Sonnet → Haiku for ~3x lower latency on the Pi.
     # ──────────────────────────────────────────────────────────────────
+    active_model = "claude-haiku-4-5" if voice_mode else CLAUDE_MODEL
     # LlmChat is stateless per instance — we pass the full transcript inline
     # via a framed user message rather than trying to replay message-by-message
     # (avoids any hidden internal history management surprises).
@@ -380,7 +387,7 @@ async def chat_with_russell(session_id: str, user_text: str, channel: str = "web
         api_key=EMERGENT_LLM_KEY,
         session_id=session_id,
         system_message=system_prompt,
-    ).with_model("anthropic", CLAUDE_MODEL)
+    ).with_model("anthropic", active_model)
 
     transcript_lines: list[str] = []
     for m in recent:
@@ -398,6 +405,19 @@ async def chat_with_russell(session_id: str, user_text: str, channel: str = "web
     else:
         framed = user_text
 
+    # Voice mode: this is spoken aloud on a Pi speaker. Force the reply short,
+    # markdown-free, list-free. Appended LAST so it wins over other rules.
+    if voice_mode:
+        framed += (
+            "\n\n[VOICE MODE — SPOKEN ALOUD] "
+            "Answer in ONE or TWO short sentences MAX (under 30 words total). "
+            "Plain spoken English only — NO asterisks, NO bullet points, NO headers, "
+            "NO 'Here's...', NO markdown of any kind. It gets read out loud by a TTS engine, "
+            "so anything symbolic sounds ridiculous. If the user asks for a spec, give ONE ratio "
+            "line and stop (e.g. 'Two ounces gin, one ounce vermouth, twist. Done.'). "
+            "Skip greetings and preamble — jump straight to the answer."
+        )
+
     try:
         reply_text = await chat.send_message(UserMessage(text=framed))
     except Exception as e:
@@ -410,7 +430,7 @@ async def chat_with_russell(session_id: str, user_text: str, channel: str = "web
             )
         raise HTTPException(500, f"LLM error: {e}")
 
-    logger.info("LLM reply via anthropic:%s", CLAUDE_MODEL)
+    logger.info("LLM reply via anthropic:%s%s", active_model, " (voice)" if voice_mode else "")
 
     reply_str = str(reply_text).strip()
 

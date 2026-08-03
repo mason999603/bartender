@@ -3,7 +3,7 @@ import io
 import logging
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
 from emergentintegrations.llm.openai import OpenAISpeechToText, OpenAITextToSpeech
@@ -108,4 +108,12 @@ async def voice_speak(req: SpeakRequest):
         "flac": "audio/flac",
         "pcm": "audio/L16",
     }.get(req.format, "application/octet-stream")
-    return Response(content=audio_bytes, media_type=media_type)
+
+    # StreamingResponse lets the Pi's mpg123 start decoding as bytes arrive
+    # instead of waiting for Content-Length. Chunk size tuned for low-latency
+    # first-frame playback on Wi-Fi (~1KB every ~10ms).
+    def _iter_chunks(data: bytes, chunk_size: int = 4096):
+        for i in range(0, len(data), chunk_size):
+            yield data[i : i + chunk_size]
+
+    return StreamingResponse(_iter_chunks(audio_bytes), media_type=media_type)
