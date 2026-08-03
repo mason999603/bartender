@@ -12,6 +12,7 @@ import {
     Coffee,
     DotsThree,
     FilmSlate,
+    CalendarBlank,
 } from "@phosphor-icons/react";
 import { useServiceMode } from "@/context/ServiceModeContext";
 
@@ -24,6 +25,7 @@ const NAV = [
     { to: "/regulars", label: "Regulars", icon: Users, testid: "nav-regulars" },
     { to: "/collections", label: "Crates", icon: Stack, testid: "nav-collections" },
     { to: "/studio", label: "Studio", icon: FilmSlate, testid: "nav-studio" },
+    { to: "/calendar", label: "Calendar", icon: CalendarBlank, testid: "nav-calendar" },
     { to: "/memory", label: "Memory", icon: Brain, testid: "nav-memory" },
     { to: "/phone", label: "Phone", icon: Phone, testid: "nav-phone" },
 ];

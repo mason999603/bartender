@@ -69,6 +69,30 @@ def _pick_recency(text: str) -> str:
     return "week"  # default: bias toward fresher results
 
 
+_CALENDAR_KEYWORDS = (
+    "calendar", "schedule", "diary",
+    "what's on", "whats on", "what am i doing",
+    "run down", "rundown", "run me down",
+    "shift", "shifts", "roster", "rostered",
+    "events", "event today",
+    "plans", "plan for",
+    "today", "tonight", "tomorrow",
+    "this week", "next week", "this weekend", "the weekend",
+    "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+    "birthday", "birthdays coming",
+    "appointment", "appointments",
+    "when am i", "when's my", "when is my",
+    "am i free", "any plans", "coming up",
+)
+
+
+def _needs_calendar_context(text: str) -> bool:
+    t = (text or "").lower()
+    return any(k in t for k in _CALENDAR_KEYWORDS)
+
+
+
+
 async def get_clash_warnings(ingredient_names: List[str]) -> List[dict]:
     names_lower = [n.lower() for n in ingredient_names]
     rules = await db.clash_rules.find({}, {"_id": 0}).to_list(1000)
@@ -344,6 +368,33 @@ async def chat_with_russell(
             "Keep it tight and conversational like SMS but you can run a bit longer if you've got a spec to give. "
             "When you give a cocktail spec, use simple line breaks and dash-bullets like '- 60ml gin' — no asterisks."
         )
+
+    # ──────────────────────────────────────────────────────────────────
+    # Optional calendar briefing — when the user asks about their schedule,
+    # events, shifts, or a specific day, we drop the ranked upcoming events
+    # into the prompt so Russell answers with facts, not guesses.
+    # ──────────────────────────────────────────────────────────────────
+    if _needs_calendar_context(user_text):
+        try:
+            from .calendar_analyzer import briefing_block, rank_upcoming
+            sources = await db.calendar_sources.find({}, {"_id": 0}).to_list(50)
+            from datetime import datetime, timedelta, timezone
+            horizon = (datetime.now(timezone.utc) + timedelta(days=14)).isoformat()
+            events = await db.calendar_events.find(
+                {"start": {"$lte": horizon}}, {"_id": 0}
+            ).to_list(2000)
+            ranked = rank_upcoming(events, sources)
+            block = briefing_block(ranked, max_items=25)
+            if block:
+                system_prompt += (
+                    "\n\n" + block +
+                    "\n\nUse ONLY these events when answering. Refer to them naturally "
+                    "('tonight', 'Friday', 'next week'). Highest-priority items "
+                    "(9-10) are the important ones — call them out first. Ignore 1-3 unless asked."
+                )
+                logger.info("Calendar briefing injected (%d events)", len(ranked))
+        except Exception:
+            logger.exception("Calendar briefing failed — continuing without it")
 
     # Recent history — 20 messages ≈ 10 turns. Emergent Claude has a huge context window
     # so we don't need to be as stingy as with Groq's free-tier TPM limits.

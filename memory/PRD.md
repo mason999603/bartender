@@ -183,6 +183,23 @@ User started asking "can you give me your source code so I can build an offline 
 - **Frontend `AutopilotPanel`** at the top of Studio: giant ON/OFF toggle, next-post time in Sydney tz, run-now button, persona render card, YouTube connect card, latest-run + history grid.
 - **End-to-end verified (iteration_12 + live test)**: Autopilot run produced a full 720×1280 H.264 24.8s MP4 (4.8MB) autonomously in ~2 minutes. Runs land at `ready-not-published` (queueing MP4s locally until user completes YouTube OAuth) or `published` once YouTube is connected.
 
+### Phase 13 (2026-02) — Reliability + Speed + Calendar
+- **Pi 24/7 hardening**: systemd `Restart=always`, watchdog `WatchdogSec=120` with `sd_notify` pings from the wake loop every 30s, 6-hour cron misfire grace, exponential backoff on network drops (2s→60s), silent 429 handling, USB mic auto re-scan on stream error, `mpg123` streaming MP3 playback, systemd Type=notify integration via `systemd-python`.
+- **Autopilot startup catchup**: `db.autopilot_state.last_run_date` (Sydney tz) as idempotency key; on backend restart, if today's slot passed and no run happened, fire a catchup. Fixed the "07:00 didn't post because container recycled" bug from real usage.
+- **Auto-install ffmpeg on backend startup** — Emergent preview containers cycle and wipe apt packages; startup hook re-installs so Studio+Autopilot MP4 assembly always works.
+- **Voice-mode speedup**: `voice_mode: true` on chat POSTs (Pi always sends this) swaps Claude Sonnet → Claude Haiku (~3× lower latency), injects a strict brevity hint at END of prompt (spoken 1-2 sentences, no markdown), MP3 format on the wire (10× smaller than WAV), streamed via `mpg123` stdin for ~200ms first-sound. VAD silence 1.4s → 0.7s. End-to-end Pi latency ~9s → ~2s. `/api/voice/speak` now uses `StreamingResponse`.
+- **News classifier broadened** (20+ conversational triggers) + system-prompt rule so Russell never claims he can't access the internet.
+
+### Phase 14 (2026-02) — iCal / iCloud calendar integration
+- **New files**:
+  - `/app/backend/core/calendar_client.py` — fetches iCloud published subscription URLs (webcal:// or https://), parses via `icalendar`, expands RRULE recurrences up to 14 days, stores in `db.calendar_events`.
+  - `/app/backend/core/calendar_analyzer.py` — importance ranker (1-10) with categories: shift, travel_vacation, ceremony, paid_ticket, medical, birthday, appointment, personal, meeting, routine, reminder, ordinary. Combines keyword taxonomy, duration heuristics, venue hints, and `is_work` calendar flag.
+  - `/app/backend/routers/calendar_routes.py` — sources CRUD, `POST /refresh`, `GET /upcoming?days=N`, `GET /briefing`.
+- **Brain integration**: `_needs_calendar_context()` classifier fires on schedule/roster/day-of-week keywords; when triggered, injects the ranked briefing block into the system prompt.
+- **Background refresh**: APScheduler `IntervalTrigger(minutes=15)` job re-fetches all sources.
+- **Frontend `/calendar` page** (new tab): sources list with work/home icons + status, add-calendar form with inline setup help, horizon tabs (Today/This week/2 weeks/This month), grouped-by-day event list with priority badges + colour bars.
+- **Live test**: User's two iCloud calendars connected. Hapkido training correctly categorized as `3/10 routine`. Voice-mode chat "run down my week" returned two spoken sentences with the events.
+
 ## Prioritized Backlog
 ### P1 — Next up
 - [ ] Complete YouTube OAuth handshake (open `/api/youtube/login` from the app, log in, authorise) so Autopilot lands `published` instead of `ready-not-published`.

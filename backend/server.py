@@ -37,6 +37,7 @@ from routers import (  # noqa: E402
     voice,
     youtube_routes,
     autopilot_routes,
+    calendar_routes,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -190,6 +191,7 @@ for r in (
     studio.router,
     youtube_routes.router,
     autopilot_routes.router,
+    calendar_routes.router,
 ):
     api_router.include_router(r)
 

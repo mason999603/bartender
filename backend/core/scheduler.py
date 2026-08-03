@@ -15,14 +15,16 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 
 from core.autopilot import load_config, produce_and_publish
 from core.db import db
+from core.models import now_iso
 
 logger = logging.getLogger("russell.scheduler")
 
@@ -122,6 +124,35 @@ async def start_scheduler() -> None:
     _scheduler.start()
     cfg = await load_config(db)
     _install_job(_scheduler, cfg)
+
+    # Calendar refresh: every 15 min, pull all iCal sources.
+    async def _refresh_calendars():
+        try:
+            from core.calendar_client import fetch_and_store
+            sources = await db.calendar_sources.find({}, {"_id": 0}).to_list(50)
+            for s in sources:
+                result = await fetch_and_store(db, s)
+                await db.calendar_sources.update_one(
+                    {"id": s["id"]},
+                    {"$set": {
+                        "last_fetched": now_iso(),
+                        "last_event_count": result.get("events"),
+                        "last_error": result.get("error"),
+                    }},
+                )
+        except Exception:
+            logger.exception("Calendar refresh failed")
+
+    _scheduler.add_job(
+        _refresh_calendars,
+        trigger=IntervalTrigger(minutes=15),
+        id="calendar_refresh",
+        replace_existing=True,
+        # Fire once ~30s after startup so Russell has fresh events without a wait.
+        next_run_time=datetime.now() + timedelta(seconds=30),
+    )
+    logger.info("Calendar refresh scheduled every 15 minutes")
+
     # Fire catchup in the background so startup isn't blocked by a 2-min pipeline run
     asyncio.create_task(_catchup_if_missed())
 
