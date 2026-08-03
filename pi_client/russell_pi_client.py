@@ -132,11 +132,11 @@ def load_config() -> Config:
 # ============================================================
 # Cloud brain client
 # ============================================================
-# Emergent preview containers recycle every 1-2 hours; the endpoint returns
-# 404/502 for ~5-10s during rollover. Retry those transient failures silently
-# so the user doesn't lose an interaction whenever k8s decides to shuffle pods.
+# Emergent preview containers recycle every 1-2 hours and can be down for
+# 30-60s during rollover. Retry those transient failures silently so the user
+# doesn't lose an interaction whenever k8s decides to shuffle pods.
 _TRANSIENT_STATUS = {404, 502, 503, 504}
-_RETRY_WAITS = (2, 5, 10)
+_RETRY_WAITS = (2, 5, 10, 15, 20, 30)
 
 
 def _post_with_retry(url: str, **kwargs):
