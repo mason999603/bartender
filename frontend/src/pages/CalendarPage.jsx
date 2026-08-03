@@ -112,6 +112,21 @@ export default function CalendarPage() {
         }
     };
 
+    const disconnectCaldav = async () => {
+        if (!window.confirm("Disconnect Russell from your iCloud calendar? You can reconnect anytime.")) return;
+        try {
+            await api.delete("/calendar/write/config");
+            toast.success("Disconnected");
+            setCaldavAppleId("");
+            setCaldavPassword("");
+            setCaldavCalendarName("");
+            setShowCaldav(false);
+            loadCaldavStatus();
+        } catch (e) {
+            toast.error(e?.response?.data?.detail || "Disconnect failed");
+        }
+    };
+
     const load = async () => {
         try {
             const r = await api.get(`/calendar/upcoming?days=${days}`);
@@ -197,13 +212,25 @@ export default function CalendarPage() {
                             </span>
                         )}
                     </div>
-                    <button
-                        className="btn-ghost text-sm"
-                        onClick={() => setShowCaldav((v) => !v)}
-                        data-testid="caldav-toggle"
-                    >
-                        {caldavStatus.configured ? "Update" : "Set up"}
-                    </button>
+                    <div className="flex gap-2">
+                        {caldavStatus.configured && (
+                            <button
+                                className="btn-ghost text-sm"
+                                onClick={disconnectCaldav}
+                                data-testid="caldav-disconnect"
+                                style={{ color: "#FCA5A5" }}
+                            >
+                                Disconnect
+                            </button>
+                        )}
+                        <button
+                            className="btn-ghost text-sm"
+                            onClick={() => setShowCaldav((v) => !v)}
+                            data-testid="caldav-toggle"
+                        >
+                            {caldavStatus.configured ? "Update" : "Set up"}
+                        </button>
+                    </div>
                 </div>
 
                 {!caldavStatus.configured && !showCaldav && (

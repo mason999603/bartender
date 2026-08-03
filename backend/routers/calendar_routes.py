@@ -12,11 +12,13 @@ from pydantic import BaseModel, Field
 from core.calendar_analyzer import briefing_block, rank_upcoming
 from core.calendar_client import fetch_and_store
 from core.caldav_write import (
+    clear_config as caldav_clear_config,
     create_event as caldav_create_event,
     is_configured as caldav_is_configured,
     list_calendar_names as caldav_list_calendar_names,
     load_config as caldav_load_config,
     save_config as caldav_save_config,
+    verify_credentials as caldav_verify_credentials,
 )
 from core.db import db
 from core.models import now_iso
@@ -160,14 +162,22 @@ async def caldav_status():
 
 @router.post("/write/config")
 async def caldav_configure(req: CaldavConfigIn):
-    """Persist the Apple ID + app-specific password. Verifies by listing calendars."""
-    doc = await caldav_save_config(db, req.apple_id, req.app_specific_password, req.calendar_name)
+    """Verify creds against iCloud FIRST, then persist. Prevents a bad-password
+    write from leaving the app in a broken 'configured=true' state.
+    """
     try:
-        cals = await caldav_list_calendar_names(db)
+        cals = await caldav_verify_credentials(req.apple_id, req.app_specific_password)
     except Exception as e:
-        # Save was accepted, but the creds don't work. Report cleanly.
         raise HTTPException(400, f"Credentials rejected by iCloud: {e}")
+    doc = await caldav_save_config(db, req.apple_id, req.app_specific_password, req.calendar_name)
     return {"ok": True, "apple_id": doc["apple_id"], "calendars": cals}
+
+
+@router.delete("/write/config")
+async def caldav_disconnect():
+    """Remove the stored Apple ID + app-specific password. User can then reconfigure."""
+    n = await caldav_clear_config(db)
+    return {"deleted": n > 0}
 
 
 @router.get("/write/calendars")

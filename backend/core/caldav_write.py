@@ -48,6 +48,11 @@ async def save_config(
     return doc
 
 
+async def clear_config(db: AsyncIOMotorDatabase) -> int:
+    r = await db.caldav_config.delete_one({"_id": "primary"})
+    return r.deleted_count
+
+
 async def is_configured(db: AsyncIOMotorDatabase) -> bool:
     doc = await load_config(db)
     return bool(doc and doc.get("apple_id") and doc.get("password"))
@@ -74,6 +79,16 @@ async def list_calendar_names(db: AsyncIOMotorDatabase) -> list[str]:
     cfg = await load_config(db)
     if not cfg:
         return []
+    import asyncio
+    def _sync() -> list[str]:
+        client = _open_client(cfg)
+        return [c.name for c in client.principal().calendars()]
+    return await asyncio.to_thread(_sync)
+
+
+async def verify_credentials(apple_id: str, app_specific_password: str) -> list[str]:
+    """Verify creds against iCloud WITHOUT persisting anything. Returns calendar names."""
+    cfg = {"apple_id": apple_id.strip(), "password": app_specific_password.strip()}
     import asyncio
     def _sync() -> list[str]:
         client = _open_client(cfg)

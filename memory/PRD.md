@@ -200,6 +200,17 @@ User started asking "can you give me your source code so I can build an offline 
 - **Frontend `/calendar` page** (new tab): sources list with work/home icons + status, add-calendar form with inline setup help, horizon tabs (Today/This week/2 weeks/This month), grouped-by-day event list with priority badges + colour bars.
 - **Live test**: User's two iCloud calendars connected. Hapkido training correctly categorized as `3/10 routine`. Voice-mode chat "run down my week" returned two spoken sentences with the events.
 
+
+### Phase 8 (2026-02) — Voice-Controlled Alarms + CalDAV Write
+- **Alarm system** (`/app/backend/core/alarms.py` + `/app/backend/routers/alarm_routes.py`): Russell schedules audio alarms that fire on the Pi speaker. Full CRUD (`POST /api/alarms`, `GET /api/alarms`, `GET /api/alarms/pending`, `POST /api/alarms/{id}/fired`, `POST /api/alarms/silence`, `DELETE /api/alarms/{id}`). Supports single-shot AND `repeat_daily=true` (silence pushes fire_at +24h instead of deactivating).
+- **Pi-side alarm watcher** (`/app/pi_client/alarm_watcher.py`): background thread polls `/api/alarms/pending` every 15s, plays the spoken message via CloudTTS, ducks the wake-word listener, and stops when the alarm's `active` flips false (via voice-triggered `silence_alarm` chat action).
+- **LLM actions** (`brain.py` + `actions.py`): `set_alarm` (Russell computes UTC ISO from natural-language time using injected NOW block for Australia/Sydney tz), `silence_alarm` (triggered by "that's enough" / "shut up" / "quiet russell" etc.), and `add_event` (writes to iCloud CalDAV).
+- **CalDAV write client** (`/app/backend/core/caldav_write.py`): Apple iCloud CalDAV via `caldav` + `icalendar` libs. `verify_credentials()` validates against iCloud BEFORE persisting, so a bad app-specific password never leaves the app in a broken configured state. `clear_config()` supports full disconnect.
+- **Calendar routes**: `GET/POST/DELETE /api/calendar/write/config`, `GET /api/calendar/write/calendars`, `POST /api/calendar/write/event`.
+- **Frontend `/calendar` page**: new "Russell can add events" section at top with Set up/Update/Disconnect controls, verify-then-save flow, inline appleid.apple.com help link.
+- **Action failure relay in `brain.py`**: if any action fails (e.g. add_event when CalDAV unconfigured), Russell's reply is rewritten to speak the honest error instead of hallucinating a success. Voice mode gets a terse one-liner; web mode gets full detail.
+- **Tested** (iteration_13): backend 13/13 pass, frontend 100%. One bug found + fixed: config was persisted before verification (fixed to verify-first, plus added DELETE /write/config + Disconnect button).
+
 ## Prioritized Backlog
 ### P1 — Next up
 - [ ] Complete YouTube OAuth handshake (open `/api/youtube/login` from the app, log in, authorise) so Autopilot lands `published` instead of `ready-not-published`.
